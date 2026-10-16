@@ -28,6 +28,8 @@ jobs:
     name: Build & Package iOS App (MAUI)
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
 
     steps:
       - name: 📥 Checkout repository
@@ -38,14 +40,14 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: 📱 Setup Xcode & iOS Platform
+      - name: 📱 Setup Xcode 16.2 & iOS Platform
         run: |
           echo "Available Xcode versions:"
           ls -d /Applications/Xcode* || true
-          # 按照 MT4162 报错指引使用镜像自带的最新的官方默认 Xcode (/Applications/Xcode.app)
-          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           xcodebuild -version
           sudo xcodebuild -runFirstLaunch
+          xcodebuild -downloadPlatform iOS || true
           xcrun simctl list runtimes || true
 
       - name: 🛠️ Install .NET MAUI iOS Workload
