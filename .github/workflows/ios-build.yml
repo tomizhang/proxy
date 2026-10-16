@@ -78,7 +78,8 @@ jobs:
             /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
-            /p:CodesignProvision=""
+            /p:CodesignProvision="" \
+            -v normal
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
