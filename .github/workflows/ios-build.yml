@@ -42,10 +42,10 @@ jobs:
         run: |
           echo "Available Xcode versions:"
           ls -d /Applications/Xcode* || true
-          sudo xcode-select -s /Applications/Xcode_16.1.app/Contents/Developer || sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          # 按照 MT4162 报错指引使用镜像自带的最新的官方默认 Xcode (/Applications/Xcode.app)
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
           sudo xcodebuild -runFirstLaunch
-          xcodebuild -downloadPlatform iOS || true
           xcrun simctl list runtimes || true
 
       - name: 🛠️ Install .NET MAUI iOS Workload
