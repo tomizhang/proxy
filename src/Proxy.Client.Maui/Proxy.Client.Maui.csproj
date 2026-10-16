@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<!-- 禁用 Xcode 版本强校验 (防止 CI 环境下 .NET iOS SDK 与 Xcode 版本号细微差异阻断编译) -->
+		<ValidateXcodeVersion>false</ValidateXcodeVersion>
+		<_ValidateXcodeVersion>false</_ValidateXcodeVersion>
+
 		<!-- 当指定 BuildingForIOS 或在 macOS 上时，仅编译纯 iOS 目标 (防止触发 maccatalyst 缺失报错) -->
 		<TargetFrameworks Condition="'$(BuildingForIOS)' == 'true'">net9.0-ios</TargetFrameworks>
 		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net9.0-ios</TargetFrameworks>
