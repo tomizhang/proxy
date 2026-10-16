@@ -33,31 +33,30 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup .NET SDK (8.0.x)
+      - name: ⚙️ Setup .NET SDK (9.0.x)
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '9.0.x'
 
       - name: 📱 Select Xcode Version
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
       - name: 🛠️ Install .NET MAUI iOS Workload
         run: |
-          dotnet workload install maui-ios --no-cache
+          dotnet workload restore src/Proxy.Client.Maui/Proxy.Client.Maui.csproj /p:BuildingForIOS=true || dotnet workload install maui-ios --no-cache
 
       - name: 📦 Restore Dependencies
         run: |
-          dotnet restore src/Proxy.Client.Maui/Proxy.Client.Maui.csproj /p:BuildingForIOS=true /p:CheckEolWorkloads=false
+          dotnet restore src/Proxy.Client.Maui/Proxy.Client.Maui.csproj /p:BuildingForIOS=true
 
       - name: 🍎 Build for iOS Simulator (.app)
         run: |
           dotnet build src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
             -c ${{ github.event.inputs.build_configuration || 'Release' }} \
-            -f net8.0-ios \
+            -f net9.0-ios \
             /p:BuildingForIOS=true \
-            /p:CheckEolWorkloads=false \
             /p:Platform=iPhoneSimulator \
             /p:CreatePackage=false
 
@@ -78,9 +77,8 @@ jobs:
         run: |
           dotnet build src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
             -c ${{ github.event.inputs.build_configuration || 'Release' }} \
-            -f net8.0-ios \
+            -f net9.0-ios \
             /p:BuildingForIOS=true \
-            /p:CheckEolWorkloads=false \
             /p:Platform=iPhone \
             /p:CodesignKey="" \
             /p:CodesignProvision="" \
