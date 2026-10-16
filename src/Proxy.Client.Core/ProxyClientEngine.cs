@@ -97,6 +97,14 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         _socks5Server?.UpdateProcessBypass(bypassProcessList, enabled, mode);
     }
 
+    /// <summary>
+    /// 即时动态更新程序名单分流模式
+    /// </summary>
+    public void UpdateProcessBypass(string bypassProcessList, ProcessProxyMode mode)
+    {
+        UpdateProcessBypass(bypassProcessList, null, mode);
+    }
+
     public async Task StopAsync()
     {
         if (!_isRunning) return;

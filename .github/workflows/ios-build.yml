@@ -67,8 +67,6 @@ jobs:
             /p:EnableCodeSigning=false
 
       - name: 📱 Publish iOS App (Unsigned for Sideloading)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           dotnet publish src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
             -c ${{ github.event.inputs.build_configuration || 'Release' }} \
@@ -83,32 +81,7 @@ jobs:
             /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
-            /p:CodesignProvision="" \
-            -v normal 2>&1 | tee build-output-log.txt || true
-
-          DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | head -n 1)
-          if [ -z "$DEV_APP_PATH" ] || [ ! -d "$DEV_APP_PATH" ]; then
-            echo "=== DETECTED BUILD ERRORS ==="
-            grep -i -C 3 "error" build-output-log.txt || true
-            python3 -c "
-import urllib.request, json, os
-try:
-    content = open('build-output-log.txt').read()
-    err_tail = content[-4000:]
-    payload = json.dumps({'title': 'CI Build Failure Log', 'body': '```\n' + err_tail + '\n```'}).encode('utf-8')
-    req = urllib.request.Request('https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY'] + '/issues', data=payload, headers={
-        'Authorization': 'token ' + os.environ['GH_TOKEN'],
-        'User-Agent': 'Python',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-    })
-    urllib.request.urlopen(req)
-    print('✅ Successfully created issue with error log')
-except Exception as e:
-    print('Failed to create issue:', e)
-"
-            exit 1
-          fi
+            /p:CodesignProvision=""
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
