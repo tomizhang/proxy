@@ -40,7 +40,7 @@ jobs:
 
       - name: 📱 Select Xcode Version
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          sudo xcode-select -s /Applications/Xcode_16.2.app || sudo xcode-select -s /Applications/Xcode_16.1.app || sudo xcode-select -s /Applications/Xcode_16.0.app || sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
       - name: 🛠️ Install .NET MAUI iOS Workload
@@ -62,6 +62,9 @@ jobs:
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
+            /p:PublishTrimmed=false \
+            /p:EnableAssemblyTrimming=false \
+            /p:MtouchLink=None \
             /p:Platform=iPhoneSimulator \
             /p:CreatePackage=false
 
@@ -86,10 +89,12 @@ jobs:
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
+            /p:PublishTrimmed=false \
+            /p:EnableAssemblyTrimming=false \
+            /p:MtouchLink=SdkOnly \
             /p:Platform=iPhone \
             /p:CodesignKey="" \
-            /p:CodesignProvision="" \
-            /p:EnableAssemblyTrimming=false
+            /p:CodesignProvision=""
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
