@@ -51,7 +51,7 @@ jobs:
         run: |
           dotnet restore src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
             /p:BuildingForIOS=true \
-            -r ios-arm64 \
+            /p:Platform=iPhone \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
@@ -63,20 +63,22 @@ jobs:
           dotnet build src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
             -c ${{ github.event.inputs.build_configuration || 'Release' }} \
             -f net9.0-ios \
-            -r ios-arm64 \
+            /p:Platform=iPhone \
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
             /p:MtouchLink=None \
-            /p:EnableCodeSigning=false
+            /p:EnableCodeSigning=false \
+            /p:CodesignKey="" \
+            /p:CodesignProvision=""
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
           mkdir -p build-output
-          DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | grep -i "ios-arm64" | head -n 1)
+          DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | grep -i "iphone" | grep -v "iossimulator" | head -n 1)
           if [ -z "$DEV_APP_PATH" ]; then
-            DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | grep -i "iphone" | grep -v "iossimulator" | head -n 1)
+            DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | head -n 1)
           fi
           if [ -d "$DEV_APP_PATH" ]; then
             echo "Found Device App at $DEV_APP_PATH"
