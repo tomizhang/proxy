@@ -5,9 +5,9 @@
 		<ValidateXcodeVersion>false</ValidateXcodeVersion>
 		<_ValidateXcodeVersion>false</_ValidateXcodeVersion>
 
-		<!-- iOS 必须在编译时满足 PublishTrimmed=true，配合 MtouchLink=None 完全跳过程序集裁剪以确保 CI 环境稳定编译 -->
+		<!-- 按照 MT0180 编译器要求将 MtouchLink 设为 SdkOnly (Link Framework SDKs Only)，避开 Xcode 缺少的新版 API 头文件 -->
 		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">true</PublishTrimmed>
-		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">None</MtouchLink>
+		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">SdkOnly</MtouchLink>
 		<EnableCodeSigning Condition="'$(EnableCodeSigning)' == ''">false</EnableCodeSigning>
 
 		<!-- 强制设置平台为 iphoneos / ios-arm64，避免在云端虚拟机中被误判为 iphonesimulator 导致 actool 寻找模拟器镜像失败 -->

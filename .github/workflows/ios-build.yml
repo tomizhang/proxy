@@ -62,7 +62,7 @@ jobs:
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
-            /p:MtouchLink=None \
+            /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false
 
       - name: 📱 Publish iOS App (Unsigned for Sideloading)
@@ -77,7 +77,7 @@ jobs:
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
-            /p:MtouchLink=None \
+            /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
             /p:CodesignProvision=""
