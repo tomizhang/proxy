@@ -1,0 +1,115 @@
+name: Build iOS MAUI App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "src/Proxy.Client.Maui/**"
+      - "src/Proxy.Common/**"
+      - "src/Proxy.Client.Core/**"
+      - ".github/workflows/ios-build.yml"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "src/Proxy.Client.Maui/**"
+  workflow_dispatch:
+    inputs:
+      build_configuration:
+        description: 'Build Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+
+jobs:
+  build-ios:
+    name: Build & Package iOS App (MAUI)
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Setup .NET SDK (8.0.x)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 📱 Select Xcode Version
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.4.app || sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: 🛠️ Install .NET MAUI iOS Workload
+        run: |
+          dotnet workload install maui-ios --no-cache
+
+      - name: 📦 Restore Dependencies
+        run: |
+          dotnet restore src/Proxy.Client.Maui/Proxy.Client.Maui.csproj /p:BuildingForIOS=true
+
+      - name: 🍎 Build for iOS Simulator (.app)
+        run: |
+          dotnet build src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
+            -c ${{ github.event.inputs.build_configuration || 'Release' }} \
+            -f net8.0-ios \
+            /p:BuildingForIOS=true \
+            /p:Platform=iPhoneSimulator \
+            /p:CreatePackage=false
+
+      - name: 📦 Package Simulator Build (.zip)
+        run: |
+          mkdir -p build-output
+          SIM_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | grep -i "iossimulator" | head -n 1)
+          if [ -d "$SIM_APP_PATH" ]; then
+            APP_DIR=$(dirname "$SIM_APP_PATH")
+            APP_NAME=$(basename "$SIM_APP_PATH")
+            echo "Found Simulator App at $SIM_APP_PATH"
+            (cd "$APP_DIR" && zip -r -y "${GITHUB_WORKSPACE}/build-output/CloudflareProxy-iOS-Simulator.zip" "$APP_NAME")
+          else
+            echo "⚠️ Simulator .app not found, skipping zip"
+          fi
+
+      - name: 📱 Build for Real iOS Device (Unsigned for Sideloading)
+        run: |
+          dotnet build src/Proxy.Client.Maui/Proxy.Client.Maui.csproj \
+            -c ${{ github.event.inputs.build_configuration || 'Release' }} \
+            -f net8.0-ios \
+            /p:BuildingForIOS=true \
+            /p:Platform=iPhone \
+            /p:CodesignKey="" \
+            /p:CodesignProvision="" \
+            /p:EnableAssemblyTrimming=false
+
+      - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
+        run: |
+          DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | grep -i "iphone" | grep -v "iossimulator" | head -n 1)
+          if [ -d "$DEV_APP_PATH" ]; then
+            echo "Found Device App at $DEV_APP_PATH"
+            mkdir -p build-output/Payload
+            cp -R -p "$DEV_APP_PATH" build-output/Payload/
+            cd build-output
+            zip -r -y "CloudflareProxy-iOS-Unsigned.ipa" Payload
+            rm -rf Payload
+            cd ..
+          else
+            echo "⚠️ Device .app not found, skipping IPA packaging"
+          fi
+
+      - name: 📤 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudflareProxy-iOS-Packages
+          path: build-output/*
+          retention-days: 14
+
+      - name: 🚀 Release Assets (if published release)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build-output/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

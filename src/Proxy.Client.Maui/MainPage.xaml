@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="Proxy.Client.Maui.MainPage"
+             Title="Cloudflare 代理客户端"
+             BackgroundColor="#F4F5F7">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16,12" Spacing="16">
+
+            <!-- 1. 核心状态与连接控制卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="White" Padding="18">
+                <VerticalStackLayout Spacing="12">
+                    <!-- 状态行 -->
+                    <HorizontalStackLayout Spacing="10" VerticalOptions="Center">
+                        <Label x:Name="StatusDot" Text="●" FontSize="22" FontAttributes="Bold" TextColor="Gray" VerticalOptions="Center" />
+                        <Label x:Name="StatusText" Text="未连接 (点击下方按钮连接)" FontSize="16" FontAttributes="Bold" TextColor="#1E293B" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <!-- 测速与延迟指标 -->
+                    <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto" Padding="4,6">
+                        <VerticalStackLayout Grid.Column="0" Spacing="2">
+                            <Label Text="延迟 (Ping)" FontSize="11" TextColor="#64748B" />
+                            <Label x:Name="LblLatency" Text="-- ms" FontSize="14" FontAttributes="Bold" TextColor="#0F172A" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1" Spacing="2">
+                            <Label Text="上行速率" FontSize="11" TextColor="#64748B" />
+                            <Label x:Name="LblSpeedUp" Text="↑ 0.0 KB/s" FontSize="13" FontAttributes="Bold" TextColor="#0284C7" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="2" Spacing="2">
+                            <Label Text="下行速率" FontSize="11" TextColor="#64748B" />
+                            <Label x:Name="LblSpeedDown" Text="↓ 0.0 KB/s" FontSize="13" FontAttributes="Bold" TextColor="#16A34A" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- 核心连接开关大按钮 -->
+                    <Button x:Name="BtnConnect"
+                            Text="▶ 点击连接"
+                            FontSize="17"
+                            FontAttributes="Bold"
+                            HeightRequest="52"
+                            CornerRadius="26"
+                            BackgroundColor="#107C41"
+                            TextColor="White"
+                            Clicked="OnToggleConnectClicked" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 2. 节点服务器配置卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="White" Padding="18">
+                <VerticalStackLayout Spacing="14">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label Text="🌐" FontSize="18" />
+                        <Label Text="远程节点配置 (Cloudflare WSS)" FontSize="15" FontAttributes="Bold" TextColor="#1E293B" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <!-- 节点地址与端口 -->
+                    <Grid ColumnDefinitions="3*,2*" ColumnSpacing="10">
+                        <VerticalStackLayout Grid.Column="0" Spacing="4">
+                            <Label Text="节点地址 (优选 IP / 域名)" FontSize="12" TextColor="#475569" />
+                            <Entry x:Name="TxtHost" Placeholder="如 104.16.x.x 或域名" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1" Spacing="4">
+                            <Label Text="端口" FontSize="12" TextColor="#475569" />
+                            <Entry x:Name="TxtPort" Text="5000" Keyboard="Numeric" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- TLS 开关与路径 -->
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalOptions="Center">
+                        <VerticalStackLayout Grid.Column="0" Spacing="4">
+                            <Label Text="WebSocket 伪装路径" FontSize="12" TextColor="#475569" />
+                            <Entry x:Name="TxtPath" Text="/tunnel" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1" VerticalOptions="Center" HorizontalOptions="Center" Spacing="2">
+                            <Label Text="开启 TLS (443)" FontSize="11" TextColor="#475569" HorizontalOptions="Center" />
+                            <Switch x:Name="SwUseTls" Toggled="OnTlsToggled" HorizontalOptions="Center" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- 真实 SNI 域名 -->
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="真实域名 (SNI / Host，优选时必填)" FontSize="12" TextColor="#475569" />
+                        <Entry x:Name="TxtSni" Placeholder="如 your-domain.com" FontSize="14" HeightRequest="44" />
+                    </VerticalStackLayout>
+
+                    <!-- 密码与加密算法 -->
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <VerticalStackLayout Grid.Column="0" Spacing="4">
+                            <Label Text="连接密码 / Token" FontSize="12" TextColor="#475569" />
+                            <Entry x:Name="TxtPassword" IsPassword="True" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1" Spacing="4">
+                            <Label Text="自定义加密算法" FontSize="12" TextColor="#475569" />
+                            <Picker x:Name="PickerAlgo" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <!-- 快捷操作按钮 -->
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10" Padding="0,6,0,0">
+                        <Button Text="⚡ 测试延迟" FontSize="14" HeightRequest="42" CornerRadius="10" BackgroundColor="#E0F2FE" TextColor="#0369A1" Clicked="OnTestLatencyClicked" />
+                        <Button Text="💾 保存配置" FontSize="14" HeightRequest="42" CornerRadius="10" BackgroundColor="#F1F5F9" TextColor="#334155" Clicked="OnSaveConfigClicked" />
+                    </Grid>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 3. 本地代理与分流设置卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="White" Padding="18">
+                <VerticalStackLayout Spacing="12">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label Text="⚙️" FontSize="18" />
+                        <Label Text="本地代理与直连分流" FontSize="15" FontAttributes="Bold" TextColor="#1E293B" VerticalOptions="Center" />
+                    </HorizontalStackLayout>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalOptions="Center">
+                        <VerticalStackLayout Grid.Column="0" Spacing="4">
+                            <Label Text="本地代理监听端口 (SOCKS5/HTTP)" FontSize="12" TextColor="#475569" />
+                            <Entry x:Name="TxtSocks5Port" Text="20808" Keyboard="Numeric" FontSize="14" HeightRequest="44" />
+                        </VerticalStackLayout>
+                        <VerticalStackLayout Grid.Column="1" VerticalOptions="Center" HorizontalOptions="Center" Spacing="2">
+                            <Label Text="国内直连分流" FontSize="11" TextColor="#475569" HorizontalOptions="Center" />
+                            <Switch x:Name="SwEnableBypass" IsToggled="True" HorizontalOptions="Center" />
+                        </VerticalStackLayout>
+                    </Grid>
+
+                    <VerticalStackLayout Spacing="4">
+                        <Label Text="跳过无需代理的规则 (分号分隔)" FontSize="12" TextColor="#475569" />
+                        <Editor x:Name="TxtBypassRules" HeightRequest="60" FontSize="11" AutoSize="TextChanges" />
+                    </VerticalStackLayout>
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 4. iOS 使用指引卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="#EFF6FF" Padding="16">
+                <VerticalStackLayout Spacing="8">
+                    <HorizontalStackLayout Spacing="6">
+                        <Label Text="📱" FontSize="16" />
+                        <Label Text="iOS 系统网络接入说明" FontSize="14" FontAttributes="Bold" TextColor="#1E40AF" />
+                    </HorizontalStackLayout>
+                    <Label Text="• 方式 1 (Wi-Fi 代理)：打开 iOS【设置】->【无线局域网】-> 点击当前 Wi-Fi 右侧 (i) ->【配置代理】选择【手动】，服务器填 127.0.0.1，端口填 20808 即可全局加速！" FontSize="12" TextColor="#1E3A8A" LineBreakMode="WordWrap" />
+                    <Label Text="• 方式 2 (配合规则客户端)：可搭配 Shadowrocket / Surge / Loon 添加 SOCKS5 节点：地址 127.0.0.1，端口 20808，享受自动规则分流与极速体验。" FontSize="12" TextColor="#1E3A8A" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 5. 实时运行日志卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="#1E293B" Padding="14">
+                <VerticalStackLayout Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Label Grid.Column="0" Text="📋 实时运行日志" FontSize="13" FontAttributes="Bold" TextColor="#E2E8F0" VerticalOptions="Center" />
+                        <Button Grid.Column="1" Text="清空" FontSize="11" HeightRequest="30" Padding="10,0" CornerRadius="6" BackgroundColor="#334155" TextColor="#F8FAFC" Clicked="OnClearLogClicked" />
+                    </Grid>
+                    <ScrollView HeightRequest="120">
+                        <Label x:Name="LblLogs" Text="[就绪] 等待连接..." FontFamily="Consolas" FontSize="10.5" TextColor="#94A3B8" LineBreakMode="WordWrap" />
+                    </ScrollView>
+                </VerticalStackLayout>
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

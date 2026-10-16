@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Proxy.Client.Core\Proxy.Client.Core.csproj" />
+    <ProjectReference Include="..\Proxy.Common\Proxy.Common.csproj" />
+    <None Include="wintun.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="tun2socks.exe" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+</Project>
