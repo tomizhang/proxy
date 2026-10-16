@@ -55,7 +55,8 @@ jobs:
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
-            /p:MtouchLink=None
+            /p:MtouchLink=None \
+            /p:EnableCodeSigning=false
 
       - name: 📱 Build for Real iOS Device (Unsigned for Sideloading)
         run: |
@@ -68,8 +69,7 @@ jobs:
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
             /p:MtouchLink=None \
-            /p:CodesignKey="" \
-            /p:CodesignProvision=""
+            /p:EnableCodeSigning=false
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
