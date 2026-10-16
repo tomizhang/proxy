@@ -8,6 +8,9 @@
 		<!-- 按照 MT0180 编译器要求将 MtouchLink 设为 SdkOnly (Link Framework SDKs Only)，避开 Xcode 缺少的新版 API 头文件 -->
 		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">true</PublishTrimmed>
 		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">SdkOnly</MtouchLink>
+		<!-- 启用解释器模式，允许 iOS 运行时回退执行动态与未预先 AOT 的代码，彻底防止真机启动秒退 (SIGABRT) -->
+		<UseInterpreter Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">true</UseInterpreter>
+		<MtouchInterpreter Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">all</MtouchInterpreter>
 		<IsTrimmable>false</IsTrimmable>
 		<EnableCodeSigning Condition="'$(EnableCodeSigning)' == ''">false</EnableCodeSigning>
 

@@ -79,6 +79,9 @@ jobs:
             /p:_ValidateXcodeVersion=false \
             /p:PublishTrimmed=true \
             /p:MtouchLink=SdkOnly \
+            /p:UseInterpreter=true \
+            /p:MtouchInterpreter=all \
+            /p:BuildIpa=true \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
             /p:CodesignProvision=""
@@ -86,18 +89,36 @@ jobs:
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
           mkdir -p build-output
-          DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | head -n 1)
-          if [ -d "$DEV_APP_PATH" ]; then
-            echo "Found Device App at $DEV_APP_PATH"
-            mkdir -p build-output/Payload
-            cp -R -p "$DEV_APP_PATH" build-output/Payload/
-            cd build-output
-            zip -r -y "CloudflareProxy-iOS-Unsigned.ipa" Payload
-            rm -rf Payload
-            cd ..
+          # 1. 优先查找 dotnet publish 官方生成的 .ipa 产物
+          OFFICIAL_IPA=$(find src/Proxy.Client.Maui/bin -name "*.ipa" | head -n 1)
+          if [ -n "$OFFICIAL_IPA" ] && [ -f "$OFFICIAL_IPA" ]; then
+            echo "✅ 发现官方生成的 IPA: $OFFICIAL_IPA"
+            cp "$OFFICIAL_IPA" build-output/CloudflareProxy-iOS-Unsigned.ipa
           else
-            echo "⚠️ Device .app not found, skipping IPA packaging"
+            echo "ℹ️ 未直接生成 .ipa，正在从最终 publish 产物提取 App Bundle..."
+            # 2. 严格优先查找 publish 目录下的最终产物 .app（杜绝打包未完成虚拟机初始化的中间临时产物）
+            DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -type d -path "*/publish/*.app" | head -n 1)
+            if [ -z "$DEV_APP_PATH" ]; then
+              echo "⚠️ 未在 publish 目录下找到，回退查找所有 .app"
+              DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -type d -name "*.app" | head -n 1)
+            fi
+            
+            if [ -d "$DEV_APP_PATH" ]; then
+              echo "✅ 打包目标 App 路径: $DEV_APP_PATH"
+              mkdir -p build-output/Payload
+              cp -R -p "$DEV_APP_PATH" build-output/Payload/
+              cd build-output
+              zip -r -y "CloudflareProxy-iOS-Unsigned.ipa" Payload
+              rm -rf Payload
+              cd ..
+            else
+              echo "❌ 严重错误: 未找到任何 .app 产物！"
+              exit 1
+            fi
           fi
+          
+          # 输出生成的产物信息
+          ls -lh build-output/
 
       - name: 🔏 Sign .ipa with Apple Developer Certificate (if Secrets provided)
         if: env.P12_BASE64 != '' && env.PROVISION_PROFILE_BASE64 != ''

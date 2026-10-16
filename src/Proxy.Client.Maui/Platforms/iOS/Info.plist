@@ -46,6 +46,8 @@
 		<string>audio</string>
 		<string>fetch</string>
 	</array>
+	<key>UILaunchStoryboardName</key>
+	<string>MauiSplash</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>XSAppIconAssets</key>

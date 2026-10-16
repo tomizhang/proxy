@@ -31,7 +31,7 @@ public class Program
 		}
 	}
 
-	private static void RecordCrash(Exception? ex)
+	public static void RecordCrash(Exception? ex)
 	{
 		if (ex == null) return;
 		try
