@@ -5,10 +5,9 @@
 		<ValidateXcodeVersion>false</ValidateXcodeVersion>
 		<_ValidateXcodeVersion>false</_ValidateXcodeVersion>
 
-		<!-- 禁用 ILLink / 裁剪，设置 Linker 为 SdkOnly，防止 CI 环境 Xcode 版本差异导致的 MT0180 / NETSDK1144 -->
-		<PublishTrimmed>false</PublishTrimmed>
-		<EnableAssemblyTrimming>false</EnableAssemblyTrimming>
+		<!-- 设置 Linker 行为为 SdkOnly (Link Framework SDKs Only) 并使用 partial 模式，避免 MT0180 错误 -->
 		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">SdkOnly</MtouchLink>
+		<TrimMode>partial</TrimMode>
 
 		<!-- 当指定 BuildingForIOS 或在 macOS 上时，仅编译纯 iOS 目标 (防止触发 maccatalyst 缺失报错) -->
 		<TargetFrameworks Condition="'$(BuildingForIOS)' == 'true'">net9.0-ios</TargetFrameworks>

@@ -26,7 +26,7 @@ on:
 jobs:
   build-ios:
     name: Build & Package iOS App (MAUI)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
 
     steps:
@@ -62,8 +62,6 @@ jobs:
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
-            /p:PublishTrimmed=false \
-            /p:EnableAssemblyTrimming=false \
             /p:MtouchLink=None \
             /p:Platform=iPhoneSimulator \
             /p:CreatePackage=false
@@ -89,8 +87,6 @@ jobs:
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
-            /p:PublishTrimmed=false \
-            /p:EnableAssemblyTrimming=false \
             /p:MtouchLink=SdkOnly \
             /p:Platform=iPhone \
             /p:CodesignKey="" \
