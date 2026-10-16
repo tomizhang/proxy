@@ -83,11 +83,10 @@ jobs:
 
           DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | head -n 1)
           if [ -z "$DEV_APP_PATH" ] || [ ! -d "$DEV_APP_PATH" ]; then
-            echo "## ❌ iOS App Publish Failed" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -n 100 build-output-log.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat build-output-log.txt | tail -n 100
+            echo "=== DETECTED BUILD ERRORS ==="
+            grep -i -C 3 "error" build-output-log.txt || true
+            ERR_MSG=$(tail -n 30 build-output-log.txt | tr '\r\n' '  ')
+            echo "::error title=PublishFailed::$ERR_MSG"
             exit 1
           fi
 
