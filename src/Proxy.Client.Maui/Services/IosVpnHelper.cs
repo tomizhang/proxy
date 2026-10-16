@@ -1,45 +1,34 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
-
-#if IOS
-using Foundation;
-using NetworkExtension;
-#endif
+using Microsoft.Maui.ApplicationModel;
+using Microsoft.Maui.Storage;
+using Proxy.Common.Utils;
 
 namespace Proxy.Client.Maui.Services;
 
+/// <summary>
+/// iOS 蜂窝移动网络流量与 VPN 配置服务
+/// 提供 iOS 系统 VPN 配置引导与 APN 描述文件生成
+/// </summary>
 public static class IosVpnHelper
 {
-    public static async Task<(bool Success, string Message)> SetupSystemVpnAsync(int localPort)
+    /// <summary>
+    /// 为当前代理端口生成系统专属 VPN / 蜂窝 APN 配置文件
+    /// </summary>
+    public static async Task<(bool Success, string Message, string? FilePath)> PrepareVpnProfileAsync(int localPort)
     {
-#if IOS
         try
         {
-            var managers = await NETunnelProviderManager.LoadAllFromPreferencesAsync();
-            var manager = (managers != null && managers.Length > 0)
-                ? managers[0]
-                : new NETunnelProviderManager();
+            string xml = MobileConfigHelper.GenerateCellularMobileConfigXml(localPort);
+            string cachePath = Path.Combine(FileSystem.CacheDirectory, $"CloudflareProxy_Cellular_{localPort}.mobileconfig");
+            await File.WriteAllTextAsync(cachePath, xml, System.Text.Encoding.UTF8);
 
-            var protocol = new NETunnelProviderProtocol
-            {
-                ServerAddress = $"127.0.0.1:{localPort}",
-                ProviderBundleIdentifier = "com.proxy.client.ios",
-            };
-
-            manager.ProtocolConfiguration = protocol;
-            manager.LocalizedDescription = "Cloudflare 代理 VPN";
-            manager.Enabled = true;
-
-            await manager.SaveToPreferencesAsync();
-            return (true, "✅ 系统 VPN 配置已成功写入！\n\n请在 iOS 系统弹窗中点击【允许】，随后前往【系统设置 -> VPN】开启 VPN 开关即可在蜂窝流量下使用代理！");
+            return (true, "已成功生成适用于当前代理端口的系统 VPN / 蜂窝描述文件！", cachePath);
         }
         catch (Exception ex)
         {
-            return (false, $"配置系统 VPN 提示: {ex.Message}\n\n💡 提示：若您的签名证书未包含 NetworkExtension 特殊权限，系统可能限制写入，请使用下方【方案 2 描述文件】或【方案 3 配合规则客户端】。");
+            return (false, $"生成配置失败: {ex.Message}", null);
         }
-#else
-        await Task.CompletedTask;
-        return (false, "当前非 iOS 平台，无需配置 iOS 系统 VPN");
-#endif
     }
 }

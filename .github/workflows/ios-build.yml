@@ -84,7 +84,7 @@ jobs:
             /p:BuildIpa=true \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
-            /p:CodesignProvision="" 2>&1 | tee build-output-log.txt
+            /p:CodesignProvision=""
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |

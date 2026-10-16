@@ -445,12 +445,47 @@ public partial class MainPage : ContentPage
     private async void OnConfigureSystemVpnClicked(object? sender, EventArgs e)
     {
         SaveUiToConfig();
-        AppendLog("🛡️ 正在尝试向 iOS 系统注入 VPN 配置...");
+        AppendLog("🛡️ 正在准备 iOS 系统 VPN / 蜂窝网络代理配置...");
         try
         {
-            var (success, msg) = await Services.IosVpnHelper.SetupSystemVpnAsync(_config.LocalSocks5Port);
-            AppendLog(msg);
-            await DisplayAlert(success ? "系统 VPN 配置" : "配置结果", msg, "确定");
+            var (success, msg, path) = await Services.IosVpnHelper.PrepareVpnProfileAsync(_config.LocalSocks5Port);
+            if (!success || string.IsNullOrEmpty(path))
+            {
+                AppendLog($"❌ {msg}");
+                await DisplayAlert("提示", msg, "确定");
+                return;
+            }
+
+            AppendLog($"✅ {msg}");
+
+            // 若当前代理正在运行，引导用户通过 Safari 一键安装
+            if (_engine != null && _engine.IsRunning)
+            {
+                bool openSafari = await DisplayAlert("iOS 系统 VPN 与流量配置",
+                    "💡 由于 iOS 系统底层安全机制，需通过描述文件将移动蜂窝流量接管至本地代理：\n\n" +
+                    "• 方案 A (推荐)：点击【在 Safari 中安装】，系统将弹出配置描述文件下载提示，随后进入【系统设置 -> 已下载的描述文件】安装即可；\n" +
+                    "• 方案 B：点击【导出/分享文件】保存至本地文件或通过隔空投送安装。",
+                    "在 Safari 中安装", "导出/分享文件");
+
+                if (openSafari)
+                {
+                    await Browser.Default.OpenAsync($"http://127.0.0.1:{_config.LocalSocks5Port}/mobileconfig", BrowserLaunchMode.External);
+                    return;
+                }
+            }
+            else
+            {
+                await DisplayAlert("iOS 系统 VPN 与流量配置",
+                    "💡 提示：建议先在主界面点击【点击连接】启动本地代理，随后再点击此按钮，Safari 将自动弹出描述文件安装确认！\n\n您也可以直接点击【确定】导出描述文件手动安装。",
+                    "确定");
+            }
+
+            // 导出/分享文件
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "安装 iOS 系统 VPN / 蜂窝代理描述文件",
+                File = new ShareFile(path, "application/x-apple-aspen-config")
+            });
         }
         catch (Exception ex)
         {
