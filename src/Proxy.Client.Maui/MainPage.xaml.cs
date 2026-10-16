@@ -153,7 +153,7 @@ public partial class MainPage : ContentPage
         // 若引擎正在运行，实时无缝热生效
         if (_engine != null && _engine.IsRunning)
         {
-            _engine.UpdateProcessBypass(_config.BypassProcesses, _config.ProcessFilterMode);
+            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.ProcessFilterMode);
             AppendLog($"🔄 分流模式已即时热切换为: {(e.Value ? "【白名单模式 (仅代理选中)】" : "【黑名单模式 (仅直连选中)】")}");
         }
     }

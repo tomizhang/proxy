@@ -59,7 +59,7 @@ jobs:
             /p:RuntimeIdentifier=ios-arm64 \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
-            /p:PublishTrimmed=false \
+            /p:PublishTrimmed=true \
             /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false
 
@@ -74,7 +74,7 @@ jobs:
             /p:BuildingForIOS=true \
             /p:ValidateXcodeVersion=false \
             /p:_ValidateXcodeVersion=false \
-            /p:PublishTrimmed=false \
+            /p:PublishTrimmed=true \
             /p:MtouchLink=SdkOnly \
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
