@@ -26,28 +26,24 @@ on:
 jobs:
   build-ios:
     name: Build & Package iOS App (MAUI)
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 60
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_16.2.app/Contents/Developer
 
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: ⚙️ Setup .NET SDK (9.0.100)
+      - name: ⚙️ Setup .NET SDK (9.0.x)
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.100'
+          dotnet-version: '9.0.x'
 
-      - name: 📱 Setup Xcode 16.2 & iOS Platform
+      - name: 📱 Setup Xcode & iOS Platform
         run: |
           echo "Available Xcode versions:"
           ls -d /Applications/Xcode* || true
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           xcodebuild -version
-          sudo xcodebuild -runFirstLaunch
-          xcodebuild -downloadPlatform iOS || true
+          sudo xcodebuild -runFirstLaunch || true
           xcrun simctl list runtimes || true
 
       - name: 🛠️ Install .NET MAUI iOS Workload

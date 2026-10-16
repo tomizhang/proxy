@@ -79,9 +79,6 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.0" />
 	</ItemGroup>
 
-	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-		<PackageReference Include="Microsoft.iOS.Sdk.net9.0_26.0" Version="26.0.9785" />
-	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\Proxy.Common\Proxy.Common.csproj" />
