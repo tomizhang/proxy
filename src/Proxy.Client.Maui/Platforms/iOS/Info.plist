@@ -43,9 +43,11 @@
 	<string>需要访问本地网络以在手机上运行本地 SOCKS5 与 HTTP 代理服务</string>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>processing</string>
-		<string>network-authentication</string>
+		<string>audio</string>
+		<string>fetch</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>XSAppIconAssets</key>
 	<string>Assets.xcassets/appicon.appiconset</string>
 </dict>

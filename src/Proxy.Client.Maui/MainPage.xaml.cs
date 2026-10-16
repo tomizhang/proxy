@@ -28,51 +28,87 @@ public partial class MainPage : ContentPage
 
     public MainPage()
     {
-        InitializeComponent();
-
-        // 填充加密算法选项
-        foreach (var algo in CryptoFactory.SupportedAlgorithms)
+        try
         {
-            PickerAlgo.Items.Add(algo);
+            InitializeComponent();
+
+            // 填充加密算法选项
+            foreach (var algo in CryptoFactory.SupportedAlgorithms)
+            {
+                PickerAlgo.Items.Add(algo);
+            }
+
+            _config = LoadConfig();
+            ApplyConfigToUi();
         }
+        catch (Exception ex)
+        {
+            _config ??= CreateDefaultConfig();
+            System.Diagnostics.Debug.WriteLine($"[MainPage Init Error] {ex}");
+        }
+    }
 
-        _config = LoadConfig();
-        ApplyConfigToUi();
+    protected override void OnAppearing()
+    {
+        base.OnAppearing();
+        try
+        {
+            if (_speedTimer == null && Dispatcher != null)
+            {
+                _speedTimer = Dispatcher.CreateTimer();
+                _speedTimer.Interval = TimeSpan.FromSeconds(1);
+                _speedTimer.Tick += OnSpeedTimerTick;
+                _speedTimer.Start();
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Timer Init Warning] {ex}");
+        }
+    }
 
-        // 开启 1 秒测速定时器
-        _speedTimer = Dispatcher.CreateTimer();
-        _speedTimer.Interval = TimeSpan.FromSeconds(1);
-        _speedTimer.Tick += OnSpeedTimerTick;
-        _speedTimer.Start();
+    protected override void OnDisappearing()
+    {
+        base.OnDisappearing();
+        try
+        {
+            _speedTimer?.Stop();
+            _speedTimer = null;
+        }
+        catch { }
     }
 
     private ProxyClientConfig LoadConfig()
     {
-        string? json = Preferences.Default.Get<string?>(ConfigStorageKey, null);
-        if (!string.IsNullOrWhiteSpace(json))
+        try
         {
-            try
+            string? json = Preferences.Default.Get<string?>(ConfigStorageKey, null);
+            if (!string.IsNullOrWhiteSpace(json))
             {
-                var cfg = JsonSerializer.Deserialize<ProxyClientConfig>(json);
+                var cfg = JsonSerializer.Deserialize(json, ProxyJsonContext.Default.ProxyClientConfig);
                 if (cfg != null) return cfg;
             }
-            catch { }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadConfig Error] {ex.Message}");
         }
 
-        // 默认初始配置
-        return new ProxyClientConfig
-        {
-            ServerHost = "127.0.0.1",
-            ServerPort = 5000,
-            Path = "/tunnel",
-            Password = "DefaultSecurePassword123!",
-            Algorithm = "aes-256-gcm",
-            LocalSocks5Port = 20808,
-            EnableBypass = true,
-            EnableSystemProxy = false, // iOS 不使用 Windows 注册表系统代理
-            EnableTun = false          // iOS 通过本地 SOCKS5 或 Wi-Fi 代理接入
-        };
+        return CreateDefaultConfig();
     }
+
+    private static ProxyClientConfig CreateDefaultConfig() => new()
+    {
+        ServerHost = "127.0.0.1",
+        ServerPort = 5000,
+        Path = "/tunnel",
+        Password = "DefaultSecurePassword123!",
+        Algorithm = "aes-256-gcm",
+        LocalSocks5Port = 20808,
+        EnableBypass = true,
+        EnableSystemProxy = false, // iOS 不使用 Windows 注册表系统代理
+        EnableTun = false          // iOS 通过本地 SOCKS5 或 Wi-Fi 代理接入
+    };
 
     private void ApplyConfigToUi()
     {
@@ -140,7 +176,7 @@ public partial class MainPage : ContentPage
         _config.EnableSystemProxy = false;
         _config.EnableTun = false;
 
-        string json = JsonSerializer.Serialize(_config);
+        string json = JsonSerializer.Serialize(_config, ProxyJsonContext.Default.ProxyClientConfig);
         Preferences.Default.Set(ConfigStorageKey, json);
     }
 

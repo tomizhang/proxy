@@ -5,9 +5,12 @@
 		<ValidateXcodeVersion>false</ValidateXcodeVersion>
 		<_ValidateXcodeVersion>false</_ValidateXcodeVersion>
 
-		<!-- 按照 MT0180 编译器要求将 MtouchLink 设为 SdkOnly (Link Framework SDKs Only)，避开 Xcode 缺少的新版 API 头文件 -->
-		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">true</PublishTrimmed>
+		<!-- 按照 MT0180 编译器要求将 MtouchLink 设为 SdkOnly (Link Framework SDKs Only)，避开 Xcode 缺少的新版 API 头文件；关闭激进 IL 裁剪防止 MAUI 控件与数据模型被误裁导致运行时闪退 -->
+		<PublishTrimmed Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">false</PublishTrimmed>
 		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">SdkOnly</MtouchLink>
+		<TrimmerRootAssembly Include="Proxy.Client.Maui" />
+		<TrimmerRootAssembly Include="Proxy.Common" />
+		<TrimmerRootAssembly Include="Proxy.Client.Core" />
 		<EnableCodeSigning Condition="'$(EnableCodeSigning)' == ''">false</EnableCodeSigning>
 
 		<!-- 强制设置平台为 iphoneos / ios-arm64，避免在云端虚拟机中被误判为 iphonesimulator 导致 actool 寻找模拟器镜像失败 -->

@@ -168,7 +168,7 @@
                         <Button Grid.Column="1" Text="清空" FontSize="11" HeightRequest="30" Padding="10,0" CornerRadius="6" BackgroundColor="#334155" TextColor="#F8FAFC" Clicked="OnClearLogClicked" />
                     </Grid>
                     <ScrollView HeightRequest="120">
-                        <Label x:Name="LblLogs" Text="[就绪] 等待连接..." FontFamily="Consolas" FontSize="10.5" TextColor="#94A3B8" LineBreakMode="WordWrap" />
+                        <Label x:Name="LblLogs" Text="[就绪] 等待连接..." FontSize="10.5" TextColor="#94A3B8" LineBreakMode="WordWrap" />
                     </ScrollView>
                 </VerticalStackLayout>
             </Border>
