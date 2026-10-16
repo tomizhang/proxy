@@ -88,6 +88,7 @@ public partial class MainPage : ContentPage
 
         TxtSocks5Port.Text = _config.LocalSocks5Port.ToString();
         SwEnableBypass.IsToggled = _config.EnableBypass;
+        PickerFilterMode.SelectedIndex = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? 1 : 0;
         TxtBypassRules.Text = _config.BypassRules;
     }
 
@@ -103,6 +104,7 @@ public partial class MainPage : ContentPage
 
         _config.LocalSocks5Port = int.TryParse(TxtSocks5Port.Text, out var sp) ? sp : 20808;
         _config.EnableBypass = SwEnableBypass.IsToggled;
+        _config.ProcessFilterMode = PickerFilterMode.SelectedIndex == 1 ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
         _config.BypassRules = TxtBypassRules.Text?.Trim() ?? "";
 
         _config.EnableSystemProxy = false;

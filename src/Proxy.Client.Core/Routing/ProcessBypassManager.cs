@@ -5,11 +5,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Runtime.InteropServices;
+using Proxy.Common.Models;
 
 namespace Proxy.Client.Core.Routing;
 
 /// <summary>
-/// 应用程序进程直连分流管理器 (根据发起请求的进程名，如 rustdesk.exe，进行白名单拦截直连，不走代理隧道)
+/// 应用程序进程分流管理器 (支持“仅直连选中的应用”或“只为选中的应用进行代理”)
 /// </summary>
 public sealed class ProcessBypassManager
 {
@@ -54,7 +55,7 @@ public sealed class ProcessBypassManager
     }
 
     /// <summary>
-    /// 检查指定进程名是否命中白名单
+    /// 检查指定进程名是否命中名单
     /// </summary>
     public bool IsProcessMatched(string processName)
     {
@@ -64,45 +65,111 @@ public sealed class ProcessBypassManager
     }
 
     /// <summary>
-    /// 判断给定的客户端端口及目标地址是否属于被放行的直连程序
+    /// 解析请求的发起源进程名称
     /// </summary>
-    public bool ShouldBypass(int clientPort, string targetHost, int targetPort, out string matchedProcess)
+    public string? ResolveOriginProcess(int clientPort, string targetHost, int targetPort)
     {
-        matchedProcess = string.Empty;
-
-        // 1. 优先尝试根据接入端口获取发起进程 (SOCKS5 / 系统代理模式直接命中发起程序)
         var clientProc = GetProcessInfoByPort(clientPort);
         if (!string.IsNullOrEmpty(clientProc))
         {
-            // 如果连接来自 tun2socks，说明是 TUN 模式，此时真正的源程序在 Windows TCP 表中发往 targetHost:targetPort
             if (clientProc.Equals("tun2socks", StringComparison.OrdinalIgnoreCase) ||
                 clientProc.Equals("tun2socks.exe", StringComparison.OrdinalIgnoreCase))
             {
                 var tunOriginProc = FindOriginProcessForTun(targetHost, targetPort);
-                if (!string.IsNullOrEmpty(tunOriginProc) && IsProcessMatched(tunOriginProc))
-                {
-                    matchedProcess = tunOriginProc;
-                    return true;
-                }
+                return !string.IsNullOrEmpty(tunOriginProc) ? tunOriginProc : clientProc;
             }
-            else if (IsProcessMatched(clientProc))
+            return clientProc;
+        }
+
+        return FindOriginProcessForTun(targetHost, targetPort);
+    }
+
+    /// <summary>
+    /// 判断给定的客户端端口及目标地址是否应当直连（根据所选模式：仅直连选中应用 或 只为选中应用代理）
+    /// </summary>
+    public bool ShouldBypass(
+        int clientPort,
+        string targetHost,
+        int targetPort,
+        ProcessProxyMode mode,
+        out string matchedProcess,
+        out string logReason)
+    {
+        matchedProcess = string.Empty;
+        logReason = string.Empty;
+
+        string? proc = ResolveOriginProcess(clientPort, targetHost, targetPort);
+        bool hasProc = !string.IsNullOrEmpty(proc);
+        bool isMatched = hasProc && IsProcessMatched(proc!);
+
+        if (mode == ProcessProxyMode.ProxySelected)
+        {
+            // 模式：只为选中的应用进行代理 (白名单模式)
+            if (isMatched)
             {
-                matchedProcess = clientProc;
+                // 该程序在选中名单中 -> 走代理！(返回 false，即不直连绕过)
+                matchedProcess = proc!;
+                return false;
+            }
+            else
+            {
+                // 该程序不在选中名单中 -> 直连！(返回 true，直连绕过)
+                matchedProcess = hasProc ? proc! : "未在代理名单应用";
+                logReason = $"[仅代理模式] {matchedProcess} -> {targetHost}:{targetPort} (非选中代理应用，直接连接)";
                 return true;
             }
         }
         else
         {
-            // 端口直查未取到时（如 TUN 虚拟网卡模式部分场景），通过目标端口匹配
-            var tunOriginProc = FindOriginProcessForTun(targetHost, targetPort);
-            if (!string.IsNullOrEmpty(tunOriginProc) && IsProcessMatched(tunOriginProc))
+            // 模式：仅直连选中的应用 (黑名单模式，默认)
+            if (isMatched)
             {
-                matchedProcess = tunOriginProc;
+                matchedProcess = proc!;
+                logReason = $"[程序直连] {proc} -> {targetHost}:{targetPort} (命中排除名单，跳过代理)";
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 兼容旧版调用的重载，默认模式为直连排除模式
+    /// </summary>
+    public bool ShouldBypass(int clientPort, string targetHost, int targetPort, out string matchedProcess)
+    {
+        return ShouldBypass(clientPort, targetHost, targetPort, ProcessProxyMode.BypassSelected, out matchedProcess, out _);
+    }
+
+    /// <summary>
+    /// 用于快速判断指定进程名在当前模式下是否应直连（主要用于单元测试与策略校验）
+    /// </summary>
+    public bool ShouldBypassProcessName(string processName, ProcessProxyMode mode, out string logReason)
+    {
+        bool isMatched = !string.IsNullOrWhiteSpace(processName) && IsProcessMatched(processName);
+        if (mode == ProcessProxyMode.ProxySelected)
+        {
+            if (isMatched)
+            {
+                logReason = $"[仅代理模式] {processName} (命中选中代理名单 -> 走代理)";
+                return false;
+            }
+            else
+            {
+                logReason = $"[仅代理模式] {processName} (非选中代理应用 -> 直连)";
                 return true;
             }
         }
-
-        return false;
+        else
+        {
+            if (isMatched)
+            {
+                logReason = $"[程序直连] {processName} (命中排除名单 -> 直连)";
+                return true;
+            }
+            logReason = $"[常规代理] {processName} (未在排除名单 -> 走代理)";
+            return false;
+        }
     }
 
     /// <summary>

@@ -49,6 +49,9 @@ public partial class MainForm : Form
     private CheckBox _chkEnableBypass = null!;
     private TextBox _txtBypassRules = null!;
     private CheckBox _chkEnableProcessBypass = null!;
+    private RadioButton _rbBypassSelected = null!;
+    private RadioButton _rbProxySelected = null!;
+    private Label _lblProcessTip = null!;
     private CheckedListBox _clbProcesses = null!;
     private CheckBox _chkEnableTun = null!;
     private CheckBox _chkEnableLogs = null!;
@@ -369,8 +372,8 @@ public partial class MainForm : Form
 
         _chkEnableProcessBypass = new CheckBox
         {
-            Text = "开启程序名单直连分流 (勾选的程序网络访问不走代理，直接使用本地网络直连)",
-            Location = new Point(20, 16),
+            Text = "启用应用程序分流过滤",
+            Location = new Point(20, 14),
             AutoSize = true,
             Checked = true,
             Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold),
@@ -383,10 +386,54 @@ public partial class MainForm : Form
             ApplyProcessBypassImmediately();
         };
 
-        var lblProcessTip = new Label
+        var pnlModes = new FlowLayoutPanel
+        {
+            Location = new Point(20, 38),
+            Size = new Size(725, 26),
+            FlowDirection = FlowDirection.LeftToRight
+        };
+
+        _rbBypassSelected = new RadioButton
+        {
+            Text = "仅直连选中的应用 (黑名单模式：选中的程序直连，其余所有应用走代理)",
+            AutoSize = true,
+            Checked = true,
+            Font = new Font("Microsoft YaHei UI", 9F),
+            Cursor = Cursors.Hand,
+            Margin = new Padding(0, 0, 20, 0)
+        };
+
+        _rbProxySelected = new RadioButton
+        {
+            Text = "只为选中的应用进行代理 (白名单模式：仅选中的程序走代理，其余应用全部直连)",
+            AutoSize = true,
+            Font = new Font("Microsoft YaHei UI", 9F),
+            Cursor = Cursors.Hand
+        };
+
+        _rbBypassSelected.CheckedChanged += (s, e) =>
+        {
+            if (_isLoadingConfig || !_rbBypassSelected.Checked) return;
+            _config.ProcessFilterMode = ProcessProxyMode.BypassSelected;
+            UpdateProcessTip();
+            ApplyProcessBypassImmediately();
+        };
+
+        _rbProxySelected.CheckedChanged += (s, e) =>
+        {
+            if (_isLoadingConfig || !_rbProxySelected.Checked) return;
+            _config.ProcessFilterMode = ProcessProxyMode.ProxySelected;
+            UpdateProcessTip();
+            ApplyProcessBypassImmediately();
+        };
+
+        pnlModes.Controls.Add(_rbBypassSelected);
+        pnlModes.Controls.Add(_rbProxySelected);
+
+        _lblProcessTip = new Label
         {
             Text = "💡 提示：名单中打勾的程序（如远程桌面 RustDesk、微信、QQ、网盘、Steam）网络请求自动直连，不消耗代理流量，极速且低延迟。",
-            Location = new Point(20, 44),
+            Location = new Point(20, 68),
             Size = new Size(720, 20),
             ForeColor = Color.FromArgb(80, 90, 100),
             Font = new Font("Microsoft YaHei UI", 8.5F)
@@ -394,8 +441,8 @@ public partial class MainForm : Form
 
         _clbProcesses = new CheckedListBox
         {
-            Location = new Point(20, 70),
-            Size = new Size(530, 145),
+            Location = new Point(20, 92),
+            Size = new Size(530, 125),
             CheckOnClick = true,
             Font = new Font("Segoe UI", 9.5F)
         };
@@ -403,8 +450,8 @@ public partial class MainForm : Form
 
         var pnlProcButtons = new Panel
         {
-            Location = new Point(565, 70),
-            Size = new Size(180, 145)
+            Location = new Point(565, 92),
+            Size = new Size(180, 125)
         };
 
         var btnAddRunning = new Button
@@ -475,7 +522,7 @@ public partial class MainForm : Form
         ]);
 
         tabProcess.Controls.AddRange([
-            _chkEnableProcessBypass, lblProcessTip, _clbProcesses, pnlProcButtons
+            _chkEnableProcessBypass, pnlModes, _lblProcessTip, _clbProcesses, pnlProcButtons
         ]);
 
         tabControl.TabPages.Add(tabNode);
@@ -552,11 +599,36 @@ public partial class MainForm : Form
             _chkEnableTun.Checked = _config.EnableTun;
             _chkEnableLogs.Checked = _config.EnableLogging;
             _chkEnableProcessBypass.Checked = _config.EnableProcessBypass;
+            if (_config.ProcessFilterMode == ProcessProxyMode.ProxySelected)
+            {
+                _rbProxySelected.Checked = true;
+            }
+            else
+            {
+                _rbBypassSelected.Checked = true;
+            }
+            UpdateProcessTip();
             PopulateClbFromConfig(_config.BypassProcessList);
         }
         finally
         {
             _isLoadingConfig = false;
+        }
+    }
+
+    private void UpdateProcessTip()
+    {
+        if (_lblProcessTip == null) return;
+
+        if (_rbProxySelected != null && _rbProxySelected.Checked)
+        {
+            _lblProcessTip.Text = "💡 提示：【只为选中的应用代理】模式下，仅勾选的程序网络流量走代理隧道，其余所有未勾选的程序一律直连本地网络！";
+            _lblProcessTip.ForeColor = Color.FromArgb(0, 102, 204);
+        }
+        else
+        {
+            _lblProcessTip.Text = "💡 提示：【仅直连选中的应用】模式下，勾选的程序（如微信、QQ、RustDesk、网盘）直连本地网络，其余所有应用走代理。";
+            _lblProcessTip.ForeColor = Color.FromArgb(80, 90, 100);
         }
     }
 
@@ -576,6 +648,7 @@ public partial class MainForm : Form
         _config.EnableTun = _chkEnableTun.Checked;
         _config.EnableLogging = _chkEnableLogs.Checked;
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
+        _config.ProcessFilterMode = _rbProxySelected.Checked ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
 
         var procTokens = new List<string>();
         for (int i = 0; i < _clbProcesses.Items.Count; i++)
@@ -590,7 +663,7 @@ public partial class MainForm : Form
 
         if (_engine != null && _engine.IsRunning)
         {
-            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass);
+            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass, _config.ProcessFilterMode);
         }
 
         AppendLog("✅ 配置已成功保存！");
@@ -616,6 +689,7 @@ public partial class MainForm : Form
         if (_isLoadingConfig) return;
 
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
+        _config.ProcessFilterMode = _rbProxySelected.Checked ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
 
         var procTokens = new List<string>();
         for (int i = 0; i < _clbProcesses.Items.Count; i++)
@@ -630,9 +704,10 @@ public partial class MainForm : Form
 
         if (_engine != null && _engine.IsRunning)
         {
-            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass);
+            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass, _config.ProcessFilterMode);
             int activeCount = _clbProcesses.CheckedItems.Count;
-            AppendLog($"⚡ [即时生效] 直连程序名单已动态更新 (当前启用 {activeCount} 个程序直连，直接走本地网络)！");
+            string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "只为选中的应用进行代理" : "仅直连选中的应用";
+            AppendLog($"⚡ [即时生效] 应用分流已动态更新 (当前模式: {modeDesc}，选中 {activeCount} 个应用)！");
         }
     }
 

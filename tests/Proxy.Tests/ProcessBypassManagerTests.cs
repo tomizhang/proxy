@@ -48,4 +48,32 @@ public class ProcessBypassManagerTests
         Assert.NotNull(name);
         Assert.Equal(current.ProcessName, name);
     }
+
+    [Theory]
+    [InlineData("rustdesk.exe", true)]  // 命中直连白名单 -> 直连
+    [InlineData("wechat.exe", true)]    // 命中直连白名单 -> 直连
+    [InlineData("chrome.exe", false)]   // 未在排除名单 -> 走代理
+    [InlineData("msedge.exe", false)]   // 未在排除名单 -> 走代理
+    public void ShouldBypassProcessName_BypassSelectedMode_WorksAsExpected(string procName, bool expectedBypass)
+    {
+        var manager = new ProcessBypassManager("rustdesk.exe;wechat.exe;qq.exe");
+        bool bypass = manager.ShouldBypassProcessName(procName, Proxy.Common.Models.ProcessProxyMode.BypassSelected, out var log);
+        Assert.Equal(expectedBypass, bypass);
+        Assert.NotEmpty(log);
+    }
+
+    [Theory]
+    [InlineData("chrome.exe", false)]   // 命中选中名单 -> 走代理 (不直连)
+    [InlineData("msedge.exe", false)]   // 命中选中名单 -> 走代理 (不直连)
+    [InlineData("wechat.exe", true)]    // 未在代理名单 -> 直连
+    [InlineData("rustdesk.exe", true)]  // 未在代理名单 -> 直连
+    [InlineData("notepad.exe", true)]   // 未在代理名单 -> 直连
+    public void ShouldBypassProcessName_ProxySelectedMode_WorksAsExpected(string procName, bool expectedBypass)
+    {
+        // 白名单代理模式：只代理 chrome 和 edge
+        var manager = new ProcessBypassManager("chrome.exe;msedge.exe");
+        bool bypass = manager.ShouldBypassProcessName(procName, Proxy.Common.Models.ProcessProxyMode.ProxySelected, out var log);
+        Assert.Equal(expectedBypass, bypass);
+        Assert.NotEmpty(log);
+    }
 }

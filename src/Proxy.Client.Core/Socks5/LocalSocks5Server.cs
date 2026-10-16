@@ -227,10 +227,15 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             int clientPort = (tcpClient.Client.RemoteEndPoint as IPEndPoint)?.Port ?? 0;
 
             // ==================== 3. 直连分流判断 ====================
-            // 3.1 应用程序名单直连分流 (优先检查发起连接的程序名，如 rustdesk.exe)
-            if (_config.EnableProcessBypass && _processBypassManager.ShouldBypass(clientPort, targetHost, targetPort, out var matchedProc))
+            string matchedProc = string.Empty;
+            // 3.1 应用程序名单分流判断 (支持“仅直连选中应用”或“只为选中应用代理”)
+            if (_config.EnableProcessBypass &&
+                _processBypassManager.ShouldBypass(clientPort, targetHost, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason))
             {
-                LogMessage?.Invoke($"[程序直连] {matchedProc} -> {targetHost}:{targetPort} (命中白名单，跳过代理)");
+                if (!string.IsNullOrEmpty(bypassReason))
+                {
+                    LogMessage?.Invoke(bypassReason);
+                }
                 await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
                 return;
             }
@@ -243,7 +248,14 @@ public sealed class LocalSocks5Server : IAsyncDisposable
                 return;
             }
 
-            LogMessage?.Invoke($"[隧道代理] {targetHost}:{targetPort} -> Cloudflare Tunnel");
+            if (_config.EnableProcessBypass && _config.ProcessFilterMode == ProcessProxyMode.ProxySelected && !string.IsNullOrEmpty(matchedProc))
+            {
+                LogMessage?.Invoke($"[应用代理] {matchedProc} -> {targetHost}:{targetPort} (命中选中代理名单 -> 隧道)");
+            }
+            else
+            {
+                LogMessage?.Invoke($"[隧道代理] {targetHost}:{targetPort} -> Cloudflare Tunnel");
+            }
 
             // ==================== 4. 远端加密隧道转发 ====================
             sessionId = _transport.NextSessionId();
@@ -532,13 +544,17 @@ public sealed class LocalSocks5Server : IAsyncDisposable
     }
 
     /// <summary>
-    /// 即时动态更新程序直连名单与开关状态，无需重启代理服务
+    /// 即时动态更新程序分流名单、过滤模式与开关状态，无需重启代理服务
     /// </summary>
-    public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null)
+    public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null, ProcessProxyMode? mode = null)
     {
         if (enabled.HasValue)
         {
             _config.EnableProcessBypass = enabled.Value;
+        }
+        if (mode.HasValue)
+        {
+            _config.ProcessFilterMode = mode.Value;
         }
         _processBypassManager.ParseProcessList(bypassProcessList);
     }

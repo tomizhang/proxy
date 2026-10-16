@@ -124,6 +124,18 @@
                     </Grid>
 
                     <VerticalStackLayout Spacing="4">
+                        <Label Text="分流过滤模式" FontSize="12" TextColor="#475569" />
+                        <Picker x:Name="PickerFilterMode" FontSize="13" HeightRequest="44">
+                            <Picker.ItemsSource>
+                                <x:Array Type="{x:Type x:String}">
+                                    <x:String>仅直连选中的规则/应用 (黑名单模式)</x:String>
+                                    <x:String>只为选中的应用进行代理 (白名单模式)</x:String>
+                                </x:Array>
+                            </Picker.ItemsSource>
+                        </Picker>
+                    </VerticalStackLayout>
+
+                    <VerticalStackLayout Spacing="4">
                         <Label Text="跳过无需代理的规则 (分号分隔)" FontSize="12" TextColor="#475569" />
                         <Editor x:Name="TxtBypassRules" HeightRequest="60" FontSize="11" AutoSize="TextChanges" />
                     </VerticalStackLayout>

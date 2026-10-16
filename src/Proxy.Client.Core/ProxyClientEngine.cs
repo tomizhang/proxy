@@ -81,16 +81,20 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     }
 
     /// <summary>
-    /// 即时动态更新程序名单直连分流设置，正在运行的代理会立即无缝采用新名单
+    /// 即时动态更新程序名单分流设置与模式，正在运行的代理会立即无缝采用新配置
     /// </summary>
-    public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null)
+    public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null, ProcessProxyMode? mode = null)
     {
         _config.BypassProcessList = bypassProcessList;
         if (enabled.HasValue)
         {
             _config.EnableProcessBypass = enabled.Value;
         }
-        _socks5Server?.UpdateProcessBypass(bypassProcessList, enabled);
+        if (mode.HasValue)
+        {
+            _config.ProcessFilterMode = mode.Value;
+        }
+        _socks5Server?.UpdateProcessBypass(bypassProcessList, enabled, mode);
     }
 
     public async Task StopAsync()
