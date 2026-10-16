@@ -88,8 +88,38 @@ public partial class MainPage : ContentPage
 
         TxtSocks5Port.Text = _config.LocalSocks5Port.ToString();
         SwEnableBypass.IsToggled = _config.EnableBypass;
-        PickerFilterMode.SelectedIndex = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? 1 : 0;
+        SwFilterMode.IsToggled = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected;
+        UpdateFilterModeUi(SwFilterMode.IsToggled);
         TxtBypassRules.Text = _config.BypassRules;
+    }
+
+    private void UpdateFilterModeUi(bool isWhitelist)
+    {
+        if (isWhitelist)
+        {
+            LblFilterModeTitle.Text = "🚀 白名单模式 (只代理选中规则/应用)";
+            LblFilterModeTitle.TextColor = Color.FromArgb("#0369A1");
+            LblFilterModeDesc.Text = "仅名单内的规则/应用走代理，其余所有流量直连本地网络";
+        }
+        else
+        {
+            LblFilterModeTitle.Text = "🛡️ 黑名单模式 (直连选中规则/应用)";
+            LblFilterModeTitle.TextColor = Color.FromArgb("#0F172A");
+            LblFilterModeDesc.Text = "名单内的规则/应用直连本地网络，其余流量全部走代理";
+        }
+    }
+
+    private void OnFilterModeToggled(object? sender, ToggledEventArgs e)
+    {
+        UpdateFilterModeUi(e.Value);
+        _config.ProcessFilterMode = e.Value ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
+
+        // 若引擎正在运行，实时无缝热生效
+        if (_engine != null && _engine.IsRunning)
+        {
+            _engine.UpdateProcessBypass(_config.BypassProcesses, _config.ProcessFilterMode);
+            AppendLog($"🔄 分流模式已即时热切换为: {(e.Value ? "【白名单模式 (仅代理选中)】" : "【黑名单模式 (仅直连选中)】")}");
+        }
     }
 
     private void SaveUiToConfig()
@@ -104,7 +134,7 @@ public partial class MainPage : ContentPage
 
         _config.LocalSocks5Port = int.TryParse(TxtSocks5Port.Text, out var sp) ? sp : 20808;
         _config.EnableBypass = SwEnableBypass.IsToggled;
-        _config.ProcessFilterMode = PickerFilterMode.SelectedIndex == 1 ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
+        _config.ProcessFilterMode = SwFilterMode.IsToggled ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
         _config.BypassRules = TxtBypassRules.Text?.Trim() ?? "";
 
         _config.EnableSystemProxy = false;

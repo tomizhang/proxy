@@ -123,17 +123,23 @@
                         </VerticalStackLayout>
                     </Grid>
 
-                    <VerticalStackLayout Spacing="4">
-                        <Label Text="分流过滤模式" FontSize="12" TextColor="#475569" />
-                        <Picker x:Name="PickerFilterMode" FontSize="13" HeightRequest="44">
-                            <Picker.ItemsSource>
-                                <x:Array Type="{x:Type x:String}">
-                                    <x:String>仅直连选中的规则/应用 (黑名单模式)</x:String>
-                                    <x:String>只为选中的应用进行代理 (白名单模式)</x:String>
-                                </x:Array>
-                            </Picker.ItemsSource>
-                        </Picker>
-                    </VerticalStackLayout>
+                    <!-- 黑白名单分流模式切换开关 -->
+                    <Border StrokeShape="RoundRectangle 10" Stroke="#CBD5E1" BackgroundColor="#F8FAFC" Padding="12,10">
+                        <VerticalStackLayout Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto" VerticalOptions="Center">
+                                <VerticalStackLayout Grid.Column="0" Spacing="2">
+                                    <Label x:Name="LblFilterModeTitle" Text="🛡️ 黑名单模式 (直连选中规则)" FontSize="13" FontAttributes="Bold" TextColor="#0F172A" />
+                                    <Label x:Name="LblFilterModeDesc" Text="名单内的规则/应用直连本地网络，其余流量走代理" FontSize="11" TextColor="#64748B" />
+                                </VerticalStackLayout>
+                                <Switch x:Name="SwFilterMode" Grid.Column="1" VerticalOptions="Center" Toggled="OnFilterModeToggled" />
+                            </Grid>
+                            <HorizontalStackLayout Spacing="6">
+                                <Label Text="关: 🛡️ 黑名单 (直连选中)" FontSize="10" TextColor="#64748B" />
+                                <Label Text="|" FontSize="10" TextColor="#CBD5E1" />
+                                <Label Text="开: 🚀 白名单 (仅代理选中)" FontSize="10" TextColor="#64748B" />
+                            </HorizontalStackLayout>
+                        </VerticalStackLayout>
+                    </Border>
 
                     <VerticalStackLayout Spacing="4">
                         <Label Text="跳过无需代理的规则 (分号分隔)" FontSize="12" TextColor="#475569" />

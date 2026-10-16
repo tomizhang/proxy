@@ -49,8 +49,9 @@ public partial class MainForm : Form
     private CheckBox _chkEnableBypass = null!;
     private TextBox _txtBypassRules = null!;
     private CheckBox _chkEnableProcessBypass = null!;
-    private RadioButton _rbBypassSelected = null!;
-    private RadioButton _rbProxySelected = null!;
+    private Button _btnModeBlacklist = null!;
+    private Button _btnModeWhitelist = null!;
+    private Button _btnToggleMode = null!;
     private Label _lblProcessTip = null!;
     private CheckedListBox _clbProcesses = null!;
     private CheckBox _chkEnableTun = null!;
@@ -386,54 +387,81 @@ public partial class MainForm : Form
             ApplyProcessBypassImmediately();
         };
 
-        var pnlModes = new FlowLayoutPanel
+        var pnlSwitch = new Panel
         {
             Location = new Point(20, 38),
-            Size = new Size(725, 26),
-            FlowDirection = FlowDirection.LeftToRight
+            Size = new Size(725, 34)
         };
 
-        _rbBypassSelected = new RadioButton
+        var lblSwitchTitle = new Label
         {
-            Text = "仅直连选中的应用 (黑名单模式：选中的程序直连，其余所有应用走代理)",
-            AutoSize = true,
-            Checked = true,
-            Font = new Font("Microsoft YaHei UI", 9F),
-            Cursor = Cursors.Hand,
-            Margin = new Padding(0, 0, 20, 0)
+            Text = "模式切换开关：",
+            Location = new Point(0, 7),
+            Size = new Size(95, 20),
+            Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+            ForeColor = Color.FromArgb(50, 60, 70)
         };
 
-        _rbProxySelected = new RadioButton
+        _btnModeBlacklist = new Button
         {
-            Text = "只为选中的应用进行代理 (白名单模式：仅选中的程序走代理，其余应用全部直连)",
-            AutoSize = true,
-            Font = new Font("Microsoft YaHei UI", 9F),
+            Text = "🛡️ 黑名单模式 (直连选中)",
+            Location = new Point(95, 1),
+            Size = new Size(185, 30),
+            FlatStyle = FlatStyle.Flat,
             Cursor = Cursors.Hand
         };
-
-        _rbBypassSelected.CheckedChanged += (s, e) =>
+        _btnModeBlacklist.FlatAppearance.BorderSize = 0;
+        _btnModeBlacklist.Click += (s, e) =>
         {
-            if (_isLoadingConfig || !_rbBypassSelected.Checked) return;
-            _config.ProcessFilterMode = ProcessProxyMode.BypassSelected;
-            UpdateProcessTip();
+            if (_isLoadingConfig || _config.ProcessFilterMode == ProcessProxyMode.BypassSelected) return;
+            UpdateModeSwitchUi(ProcessProxyMode.BypassSelected);
             ApplyProcessBypassImmediately();
         };
 
-        _rbProxySelected.CheckedChanged += (s, e) =>
+        _btnModeWhitelist = new Button
         {
-            if (_isLoadingConfig || !_rbProxySelected.Checked) return;
-            _config.ProcessFilterMode = ProcessProxyMode.ProxySelected;
-            UpdateProcessTip();
+            Text = "🚀 白名单模式 (仅代理选中)",
+            Location = new Point(285, 1),
+            Size = new Size(185, 30),
+            FlatStyle = FlatStyle.Flat,
+            Cursor = Cursors.Hand
+        };
+        _btnModeWhitelist.FlatAppearance.BorderSize = 0;
+        _btnModeWhitelist.Click += (s, e) =>
+        {
+            if (_isLoadingConfig || _config.ProcessFilterMode == ProcessProxyMode.ProxySelected) return;
+            UpdateModeSwitchUi(ProcessProxyMode.ProxySelected);
             ApplyProcessBypassImmediately();
         };
 
-        pnlModes.Controls.Add(_rbBypassSelected);
-        pnlModes.Controls.Add(_rbProxySelected);
+        _btnToggleMode = new Button
+        {
+            Text = "🔀 点击切换模式",
+            Location = new Point(475, 1),
+            Size = new Size(140, 30),
+            FlatStyle = FlatStyle.Flat,
+            BackColor = Color.FromArgb(240, 244, 248),
+            ForeColor = Color.FromArgb(0, 102, 204),
+            Cursor = Cursors.Hand,
+            Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold)
+        };
+        _btnToggleMode.FlatAppearance.BorderColor = Color.FromArgb(200, 215, 230);
+        _btnToggleMode.Click += (s, e) =>
+        {
+            if (_isLoadingConfig) return;
+            var nextMode = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected
+                ? ProcessProxyMode.BypassSelected
+                : ProcessProxyMode.ProxySelected;
+            UpdateModeSwitchUi(nextMode);
+            ApplyProcessBypassImmediately();
+        };
+
+        pnlSwitch.Controls.AddRange([lblSwitchTitle, _btnModeBlacklist, _btnModeWhitelist, _btnToggleMode]);
 
         _lblProcessTip = new Label
         {
             Text = "💡 提示：名单中打勾的程序（如远程桌面 RustDesk、微信、QQ、网盘、Steam）网络请求自动直连，不消耗代理流量，极速且低延迟。",
-            Location = new Point(20, 68),
+            Location = new Point(20, 74),
             Size = new Size(720, 20),
             ForeColor = Color.FromArgb(80, 90, 100),
             Font = new Font("Microsoft YaHei UI", 8.5F)
@@ -522,7 +550,7 @@ public partial class MainForm : Form
         ]);
 
         tabProcess.Controls.AddRange([
-            _chkEnableProcessBypass, pnlModes, _lblProcessTip, _clbProcesses, pnlProcButtons
+            _chkEnableProcessBypass, pnlSwitch, _lblProcessTip, _clbProcesses, pnlProcButtons
         ]);
 
         tabControl.TabPages.Add(tabNode);
@@ -599,15 +627,7 @@ public partial class MainForm : Form
             _chkEnableTun.Checked = _config.EnableTun;
             _chkEnableLogs.Checked = _config.EnableLogging;
             _chkEnableProcessBypass.Checked = _config.EnableProcessBypass;
-            if (_config.ProcessFilterMode == ProcessProxyMode.ProxySelected)
-            {
-                _rbProxySelected.Checked = true;
-            }
-            else
-            {
-                _rbBypassSelected.Checked = true;
-            }
-            UpdateProcessTip();
+            UpdateModeSwitchUi(_config.ProcessFilterMode);
             PopulateClbFromConfig(_config.BypassProcessList);
         }
         finally
@@ -616,19 +636,40 @@ public partial class MainForm : Form
         }
     }
 
-    private void UpdateProcessTip()
+    private void UpdateModeSwitchUi(ProcessProxyMode mode)
     {
-        if (_lblProcessTip == null) return;
+        _config.ProcessFilterMode = mode;
+        if (_btnModeBlacklist == null || _btnModeWhitelist == null || _btnToggleMode == null || _lblProcessTip == null) return;
 
-        if (_rbProxySelected != null && _rbProxySelected.Checked)
+        if (mode == ProcessProxyMode.ProxySelected)
         {
-            _lblProcessTip.Text = "💡 提示：【只为选中的应用代理】模式下，仅勾选的程序网络流量走代理隧道，其余所有未勾选的程序一律直连本地网络！";
+            // 白名单模式
+            _btnModeBlacklist.BackColor = Color.FromArgb(240, 243, 246);
+            _btnModeBlacklist.ForeColor = Color.FromArgb(100, 110, 120);
+            _btnModeBlacklist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
+
+            _btnModeWhitelist.BackColor = Color.FromArgb(0, 120, 215);
+            _btnModeWhitelist.ForeColor = Color.White;
+            _btnModeWhitelist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+
+            _btnToggleMode.Text = "🔀 切为【黑名单模式】";
+            _lblProcessTip.Text = "💡 提示：【🚀 白名单模式】生效中！仅勾选的程序网络走代理隧道，其余所有未勾选的程序一律直连本地网络。";
             _lblProcessTip.ForeColor = Color.FromArgb(0, 102, 204);
         }
         else
         {
-            _lblProcessTip.Text = "💡 提示：【仅直连选中的应用】模式下，勾选的程序（如微信、QQ、RustDesk、网盘）直连本地网络，其余所有应用走代理。";
-            _lblProcessTip.ForeColor = Color.FromArgb(80, 90, 100);
+            // 黑名单模式
+            _btnModeBlacklist.BackColor = Color.FromArgb(16, 124, 65);
+            _btnModeBlacklist.ForeColor = Color.White;
+            _btnModeBlacklist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
+
+            _btnModeWhitelist.BackColor = Color.FromArgb(240, 243, 246);
+            _btnModeWhitelist.ForeColor = Color.FromArgb(100, 110, 120);
+            _btnModeWhitelist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
+
+            _btnToggleMode.Text = "🔀 切为【白名单模式】";
+            _lblProcessTip.Text = "💡 提示：【🛡️ 黑名单模式】生效中！名单中勾选的程序（如微信、QQ、RustDesk、网盘）直连本地网络，其余所有程序走代理。";
+            _lblProcessTip.ForeColor = Color.FromArgb(16, 124, 65);
         }
     }
 
@@ -648,7 +689,6 @@ public partial class MainForm : Form
         _config.EnableTun = _chkEnableTun.Checked;
         _config.EnableLogging = _chkEnableLogs.Checked;
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
-        _config.ProcessFilterMode = _rbProxySelected.Checked ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
 
         var procTokens = new List<string>();
         for (int i = 0; i < _clbProcesses.Items.Count; i++)
@@ -689,7 +729,6 @@ public partial class MainForm : Form
         if (_isLoadingConfig) return;
 
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
-        _config.ProcessFilterMode = _rbProxySelected.Checked ? ProcessProxyMode.ProxySelected : ProcessProxyMode.BypassSelected;
 
         var procTokens = new List<string>();
         for (int i = 0; i < _clbProcesses.Items.Count; i++)
