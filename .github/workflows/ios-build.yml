@@ -79,14 +79,14 @@ jobs:
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
             /p:CodesignProvision="" \
-            -v normal > build-output-log.txt 2>&1 || true
+            -v normal 2>&1 | tee build-output-log.txt || true
 
           DEV_APP_PATH=$(find src/Proxy.Client.Maui/bin -name "*.app" | head -n 1)
           if [ -z "$DEV_APP_PATH" ] || [ ! -d "$DEV_APP_PATH" ]; then
             echo "=== DETECTED BUILD ERRORS ==="
             grep -i -C 3 "error" build-output-log.txt || true
-            ERR_MSG=$(tail -n 30 build-output-log.txt | tr '\r\n' '  ')
-            echo "::error title=PublishFailed::$ERR_MSG"
+            LOG_URL=$(curl -s -F "file=@build-output-log.txt" https://0x0.st || true)
+            echo "LOG_URL: $LOG_URL"
             exit 1
           fi
 
