@@ -79,7 +79,7 @@ jobs:
             /p:EnableCodeSigning=false \
             /p:CodesignKey="" \
             /p:CodesignProvision="" \
-            -v normal
+            -v normal > build-output-log.txt 2>&1 || (cat build-output-log.txt | tail -n 80 && exit 1)
 
       - name: 📦 Package Unsigned .ipa for Sideloading (AltStore / TrollStore / Sideloadly)
         run: |
@@ -114,9 +114,12 @@ jobs:
 
       - name: 📤 Upload Build Artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: CloudflareProxy-iOS-Packages
-          path: build-output/*
+          path: |
+            build-output/*
+            build-output-log.txt
           retention-days: 14
 
       - name: 🚀 Release Assets (if published release)
