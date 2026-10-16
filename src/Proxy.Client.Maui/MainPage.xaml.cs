@@ -1,15 +1,20 @@
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
 using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Maui.ApplicationModel;
+using Microsoft.Maui.ApplicationModel.DataTransfer;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Storage;
 using Proxy.Client.Core;
 using Proxy.Client.Core.Transport;
 using Proxy.Common.Crypto;
 using Proxy.Common.Models;
+using Proxy.Common.Utils;
 
 namespace Proxy.Client.Maui;
 
@@ -330,42 +335,203 @@ public partial class MainPage : ContentPage
         LblSpeedDown.Text = $"↓ {downKb:F1} KB/s";
     }
 
-    private async void OnTestLatencyClicked(object? sender, EventArgs e)
+    private async void OnTestConnectionClicked(object? sender, EventArgs e)
     {
         SaveUiToConfig();
-        string host = _config.ServerHost;
-        int port = _config.ServerPort;
-        string scheme = _config.UseTls ? "wss" : "ws";
-        string path = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
-        var uri = new Uri($"{scheme}://{host}:{port}{path}");
-
-        AppendLog($"⚡ 开始测试连接与延迟 -> {uri} ...");
-        var sw = Stopwatch.StartNew();
+        BtnTestConnection.IsEnabled = false;
+        BtnTestConnection.Text = "⏳ 测试中...";
 
         try
         {
-            using var ws = new ClientWebSocket();
-            if (!string.IsNullOrWhiteSpace(_config.SniHost))
+            if (_engine != null && _engine.IsRunning)
             {
-                ws.Options.SetRequestHeader("Host", _config.SniHost);
+                // 1. 代理运行中：测试端到端真实出海连通性
+                AppendLog($"⚡ [测试连接] 代理运行中，正在通过本地代理 (127.0.0.1:{_config.LocalSocks5Port}) 测试出海网络...");
+                var sw = Stopwatch.StartNew();
+
+                var proxy = new System.Net.WebProxy($"http://127.0.0.1:{_config.LocalSocks5Port}");
+                var handler = new HttpClientHandler
+                {
+                    Proxy = proxy,
+                    UseProxy = true
+                };
+
+                using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+                string resp = await http.GetStringAsync("https://1.1.1.1/cdn-cgi/trace");
+                sw.Stop();
+
+                long ms = sw.ElapsedMilliseconds;
+                LblLatency.Text = $"{ms} ms";
+
+                string exitIp = "未知";
+                string colo = "未知";
+                foreach (var line in resp.Split('\n'))
+                {
+                    if (line.StartsWith("ip=")) exitIp = line.Substring(3).Trim();
+                    else if (line.StartsWith("colo=")) colo = line.Substring(5).Trim();
+                }
+
+                AppendLog($"✅ [连接测试成功] 端到端延迟: {ms} ms, 出口节点机房: {colo}, 出口 IP: {exitIp}");
+                await DisplayAlert("测试连接成功",
+                    $"🎉 代理通道全面通畅！\n\n" +
+                    $"• 端到端延迟: {ms} ms\n" +
+                    $"• Cloudflare 机房: {colo}\n" +
+                    $"• 当前出口 IP: {exitIp}\n" +
+                    $"• 本地代理: 127.0.0.1:{_config.LocalSocks5Port}\n\n" +
+                    $"您的流量已成功通过加密隧道出海！", "确定");
             }
+            else
+            {
+                // 2. 代理未启动：测试远端 Cloudflare WebSocket 节点握手与延迟
+                string host = _config.ServerHost;
+                int port = _config.ServerPort;
+                string scheme = _config.UseTls ? "wss" : "ws";
+                string path = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
+                var uri = new Uri($"{scheme}://{host}:{port}{path}");
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await ws.ConnectAsync(uri, cts.Token);
-            sw.Stop();
+                AppendLog($"⚡ [测试连接] 正在测试远端 Cloudflare 节点握手 -> {uri} ...");
+                var sw = Stopwatch.StartNew();
 
-            long ms = sw.ElapsedMilliseconds;
-            LblLatency.Text = $"{ms} ms";
-            AppendLog($"✅ 连接测试成功！往返延迟: {ms} ms");
-            await DisplayAlert("测试结果", $"节点握手成功！\n网络延迟: {ms} ms\n节点地址: {host}:{port}", "确定");
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Ping done", CancellationToken.None);
+                using var ws = new ClientWebSocket();
+                if (!string.IsNullOrWhiteSpace(_config.SniHost))
+                {
+                    ws.Options.SetRequestHeader("Host", _config.SniHost);
+                }
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                await ws.ConnectAsync(uri, cts.Token);
+                sw.Stop();
+
+                long ms = sw.ElapsedMilliseconds;
+                LblLatency.Text = $"{ms} ms";
+                AppendLog($"✅ [节点握手成功] 往返网络延迟: {ms} ms (节点: {host}:{port})");
+                await DisplayAlert("测试连接成功",
+                    $"✅ 远程节点握手成功！\n\n" +
+                    $"• 握手延迟: {ms} ms\n" +
+                    $"• 节点地址: {host}:{port}\n" +
+                    $"• 协议模式: {scheme.ToUpper()} (TLS: {_config.UseTls})\n" +
+                    $"• SNI 域名: {(!string.IsNullOrEmpty(_config.SniHost) ? _config.SniHost : "未指定")}\n\n" +
+                    $"节点状态良好，可随时点击【点击连接】启动代理！", "确定");
+            }
         }
         catch (Exception ex)
         {
-            sw.Stop();
             LblLatency.Text = "超时";
-            AppendLog($"❌ 连接测试失败: {ex.Message}");
-            await DisplayAlert("测试失败", $"无法连接到目标服务器:\n{ex.Message}", "确定");
+            AppendLog($"❌ [测试连接失败] {ex.Message}");
+
+            string hint = "请检查节点 IP/域名、端口或网络连接。";
+            if (ex.Message.Contains("SSL") || ex.Message.Contains("certificate") || ex.Message.Contains("TLS"))
+            {
+                hint = "TLS/SSL 证书校验失败。若填写的节点为 Cloudflare 优选 IP，请务必在【真实域名 (SNI)】中填写您绑定的域名！";
+            }
+            else if (ex.Message.Contains("404"))
+            {
+                hint = "HTTP 404 错误：远程服务器未找到指定的 WebSocket 路径，请检查路径是否正确。";
+            }
+            else if (ex.Message.Contains("403"))
+            {
+                hint = "HTTP 403 禁止访问：请检查连接密码或 Token 是否与服务端一致。";
+            }
+
+            await DisplayAlert("测试连接失败", $"无法连接到目标：\n{ex.Message}\n\n💡 诊断建议：\n{hint}", "确定");
+        }
+        finally
+        {
+            BtnTestConnection.IsEnabled = true;
+            BtnTestConnection.Text = "⚡ 测试连接";
+        }
+    }
+
+    private async void OnConfigureSystemVpnClicked(object? sender, EventArgs e)
+    {
+        SaveUiToConfig();
+        AppendLog("🛡️ 正在尝试向 iOS 系统注入 VPN 配置...");
+        try
+        {
+            var (success, msg) = await Services.IosVpnHelper.SetupSystemVpnAsync(_config.LocalSocks5Port);
+            AppendLog(msg);
+            await DisplayAlert(success ? "系统 VPN 配置" : "配置结果", msg, "确定");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 配置 VPN 异常: {ex.Message}");
+            await DisplayAlert("错误", $"配置失败: {ex.Message}", "确定");
+        }
+    }
+
+    private async void OnInstallMobileConfigClicked(object? sender, EventArgs e)
+    {
+        SaveUiToConfig();
+        try
+        {
+            string xml = MobileConfigHelper.GenerateCellularMobileConfigXml(_config.LocalSocks5Port);
+            string cachePath = Path.Combine(FileSystem.CacheDirectory, $"CloudflareProxy_{_config.LocalSocks5Port}.mobileconfig");
+            await File.WriteAllTextAsync(cachePath, xml, System.Text.Encoding.UTF8);
+
+            AppendLog($"📥 已生成蜂窝流量描述文件: {cachePath}");
+
+            // 若代理正在运行，引导用户通过 Safari 一键下载安装
+            if (_engine != null && _engine.IsRunning)
+            {
+                bool openSafari = await DisplayAlert("安装蜂窝流量描述文件",
+                    "已生成针对当前代理端口的 iOS 描述文件！\n\n" +
+                    "点击【在 Safari 中安装】即可直接触发系统安装弹窗，前往【系统设置 -> 已下载的描述文件】确认即可。\n\n" +
+                    "或者点击【分享/导出文件】通过隔空投送或保存到本地文件。",
+                    "在 Safari 中安装", "分享/导出文件");
+
+                if (openSafari)
+                {
+                    await Browser.Default.OpenAsync($"http://127.0.0.1:{_config.LocalSocks5Port}/mobileconfig", BrowserLaunchMode.External);
+                    return;
+                }
+            }
+
+            // 分享或通过系统应用打开
+            await Share.Default.RequestAsync(new ShareFileRequest
+            {
+                Title = "安装 iOS 蜂窝网络代理描述文件",
+                File = new ShareFile(cachePath, "application/x-apple-aspen-config")
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"❌ 生成描述文件失败: {ex.Message}");
+            await DisplayAlert("生成失败", ex.Message, "确定");
+        }
+    }
+
+    private async void OnCopySocks5UrlClicked(object? sender, EventArgs e)
+    {
+        SaveUiToConfig();
+        string url = $"socks5://127.0.0.1:{_config.LocalSocks5Port}#CloudflareProxy";
+        await Clipboard.Default.SetTextAsync(url);
+        AppendLog($"📋 已复制 SOCKS5 节点链接: {url}");
+        await DisplayAlert("已复制节点", 
+            $"SOCKS5 节点链接已成功复制到剪贴板：\n\n{url}\n\n💡 提示：在 Shadowrocket、Loon、Surge 或 Stash 中添加此 SOCKS5 节点，即可直接由其接管所有蜂窝移动流量！", 
+            "确定");
+    }
+
+    private async void OnOpenShadowrocketClicked(object? sender, EventArgs e)
+    {
+        SaveUiToConfig();
+        string srUrl = $"shadowrocket://add/socks5://127.0.0.1:{_config.LocalSocks5Port}?remarks=CloudflareProxy";
+        try
+        {
+            bool launched = await Launcher.Default.OpenAsync(new Uri(srUrl));
+            if (!launched)
+            {
+                await Clipboard.Default.SetTextAsync($"socks5://127.0.0.1:{_config.LocalSocks5Port}#CloudflareProxy");
+                await DisplayAlert("未检测到客户端", 
+                    "未自动唤起 Shadowrocket。已将 SOCKS5 节点链接复制到剪贴板，您可以打开任意规则代理软件粘贴添加！", 
+                    "确定");
+            }
+        }
+        catch
+        {
+            await Clipboard.Default.SetTextAsync($"socks5://127.0.0.1:{_config.LocalSocks5Port}#CloudflareProxy");
+            await DisplayAlert("节点已复制", 
+                "已将 SOCKS5 节点链接复制到剪贴板，您可以在已安装的规则客户端中添加使用！", 
+                "确定");
         }
     }
 

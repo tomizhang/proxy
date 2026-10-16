@@ -208,6 +208,22 @@ public sealed class LocalSocks5Server : IAsyncDisposable
                 }
                 else
                 {
+                    // 检查是否为 iOS 描述文件下载请求
+                    if (method == "GET" && (target.Contains("mobileconfig") || target.EndsWith(".mobileconfig")))
+                    {
+                        string xml = Proxy.Common.Utils.MobileConfigHelper.GenerateCellularMobileConfigXml(_config.LocalSocks5Port);
+                        byte[] xmlBytes = Encoding.UTF8.GetBytes(xml);
+                        string httpResp = "HTTP/1.1 200 OK\r\n" +
+                                          "Content-Type: application/x-apple-aspen-config\r\n" +
+                                          $"Content-Disposition: attachment; filename=\"CloudflareProxy_{_config.LocalSocks5Port}.mobileconfig\"\r\n" +
+                                          $"Content-Length: {xmlBytes.Length}\r\n" +
+                                          "Connection: close\r\n\r\n";
+                        await stream.WriteAsync(Encoding.ASCII.GetBytes(httpResp), _cts.Token);
+                        await stream.WriteAsync(xmlBytes, _cts.Token);
+                        LogMessage?.Invoke($"[iOS 配置分发] 成功向客户端提供蜂窝 APN 代理描述文件 (.mobileconfig)");
+                        return;
+                    }
+
                     if (Uri.TryCreate(target, UriKind.Absolute, out var uri))
                     {
                         targetHost = uri.Host;

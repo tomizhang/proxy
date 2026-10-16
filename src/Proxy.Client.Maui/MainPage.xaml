@@ -5,6 +5,32 @@
              Title="Cloudflare 代理客户端"
              BackgroundColor="#F4F5F7">
 
+    <ContentPage.Resources>
+        <ResourceDictionary>
+            <!-- 统一设置输入框与选择器文本高对比度深色样式，彻底解决 iOS 下输入框呈现白色看不清的问题 -->
+            <Style TargetType="Entry">
+                <Setter Property="TextColor" Value="#0F172A" />
+                <Setter Property="PlaceholderColor" Value="#94A3B8" />
+                <Setter Property="BackgroundColor" Value="Transparent" />
+                <Setter Property="HeightRequest" Value="42" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+            <Style TargetType="Editor">
+                <Setter Property="TextColor" Value="#0F172A" />
+                <Setter Property="PlaceholderColor" Value="#94A3B8" />
+                <Setter Property="BackgroundColor" Value="Transparent" />
+                <Setter Property="FontSize" Value="12" />
+            </Style>
+            <Style TargetType="Picker">
+                <Setter Property="TextColor" Value="#0F172A" />
+                <Setter Property="TitleColor" Value="#94A3B8" />
+                <Setter Property="BackgroundColor" Value="Transparent" />
+                <Setter Property="HeightRequest" Value="42" />
+                <Setter Property="FontSize" Value="14" />
+            </Style>
+        </ResourceDictionary>
+    </ContentPage.Resources>
+
     <ScrollView>
         <VerticalStackLayout Padding="16,12" Spacing="16">
 
@@ -46,7 +72,7 @@
                 </VerticalStackLayout>
             </Border>
 
-            <!-- 2. 节点服务器配置卡片 -->
+            <!-- 2. 节点服务器配置卡片 (输入框全部加装圆角浅色背景容器与深色文字) -->
             <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="White" Padding="18">
                 <VerticalStackLayout Spacing="14">
                     <HorizontalStackLayout Spacing="8">
@@ -58,11 +84,15 @@
                     <Grid ColumnDefinitions="3*,2*" ColumnSpacing="10">
                         <VerticalStackLayout Grid.Column="0" Spacing="4">
                             <Label Text="节点地址 (优选 IP / 域名)" FontSize="12" TextColor="#475569" />
-                            <Entry x:Name="TxtHost" Placeholder="如 104.16.x.x 或域名" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Entry x:Name="TxtHost" Placeholder="如 104.16.x.x 或域名" />
+                            </Border>
                         </VerticalStackLayout>
                         <VerticalStackLayout Grid.Column="1" Spacing="4">
                             <Label Text="端口" FontSize="12" TextColor="#475569" />
-                            <Entry x:Name="TxtPort" Text="5000" Keyboard="Numeric" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Entry x:Name="TxtPort" Text="5000" Keyboard="Numeric" />
+                            </Border>
                         </VerticalStackLayout>
                     </Grid>
 
@@ -70,7 +100,9 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalOptions="Center">
                         <VerticalStackLayout Grid.Column="0" Spacing="4">
                             <Label Text="WebSocket 伪装路径" FontSize="12" TextColor="#475569" />
-                            <Entry x:Name="TxtPath" Text="/tunnel" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Entry x:Name="TxtPath" Text="/tunnel" />
+                            </Border>
                         </VerticalStackLayout>
                         <VerticalStackLayout Grid.Column="1" VerticalOptions="Center" HorizontalOptions="Center" Spacing="2">
                             <Label Text="开启 TLS (443)" FontSize="11" TextColor="#475569" HorizontalOptions="Center" />
@@ -81,25 +113,46 @@
                     <!-- 真实 SNI 域名 -->
                     <VerticalStackLayout Spacing="4">
                         <Label Text="真实域名 (SNI / Host，优选时必填)" FontSize="12" TextColor="#475569" />
-                        <Entry x:Name="TxtSni" Placeholder="如 your-domain.com" FontSize="14" HeightRequest="44" />
+                        <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                            <Entry x:Name="TxtSni" Placeholder="如 your-domain.com" />
+                        </Border>
                     </VerticalStackLayout>
 
                     <!-- 密码与加密算法 -->
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                         <VerticalStackLayout Grid.Column="0" Spacing="4">
                             <Label Text="连接密码 / Token" FontSize="12" TextColor="#475569" />
-                            <Entry x:Name="TxtPassword" IsPassword="True" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Entry x:Name="TxtPassword" IsPassword="True" />
+                            </Border>
                         </VerticalStackLayout>
                         <VerticalStackLayout Grid.Column="1" Spacing="4">
                             <Label Text="自定义加密算法" FontSize="12" TextColor="#475569" />
-                            <Picker x:Name="PickerAlgo" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Picker x:Name="PickerAlgo" />
+                            </Border>
                         </VerticalStackLayout>
                     </Grid>
 
                     <!-- 快捷操作按钮 -->
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10" Padding="0,6,0,0">
-                        <Button Text="⚡ 测试延迟" FontSize="14" HeightRequest="42" CornerRadius="10" BackgroundColor="#E0F2FE" TextColor="#0369A1" Clicked="OnTestLatencyClicked" />
-                        <Button Text="💾 保存配置" FontSize="14" HeightRequest="42" CornerRadius="10" BackgroundColor="#F1F5F9" TextColor="#334155" Clicked="OnSaveConfigClicked" />
+                        <Button x:Name="BtnTestConnection"
+                                Text="⚡ 测试连接" 
+                                FontSize="14" 
+                                FontAttributes="Bold"
+                                HeightRequest="42" 
+                                CornerRadius="10" 
+                                BackgroundColor="#E0F2FE" 
+                                TextColor="#0369A1" 
+                                Clicked="OnTestConnectionClicked" />
+                        <Button Text="💾 保存配置" 
+                                FontSize="14" 
+                                FontAttributes="Bold"
+                                HeightRequest="42" 
+                                CornerRadius="10" 
+                                BackgroundColor="#F1F5F9" 
+                                TextColor="#334155" 
+                                Clicked="OnSaveConfigClicked" />
                     </Grid>
                 </VerticalStackLayout>
             </Border>
@@ -115,7 +168,9 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10" VerticalOptions="Center">
                         <VerticalStackLayout Grid.Column="0" Spacing="4">
                             <Label Text="本地代理监听端口 (SOCKS5/HTTP)" FontSize="12" TextColor="#475569" />
-                            <Entry x:Name="TxtSocks5Port" Text="20808" Keyboard="Numeric" FontSize="14" HeightRequest="44" />
+                            <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                                <Entry x:Name="TxtSocks5Port" Text="20808" Keyboard="Numeric" />
+                            </Border>
                         </VerticalStackLayout>
                         <VerticalStackLayout Grid.Column="1" VerticalOptions="Center" HorizontalOptions="Center" Spacing="2">
                             <Label Text="国内直连分流" FontSize="11" TextColor="#475569" HorizontalOptions="Center" />
@@ -143,24 +198,101 @@
 
                     <VerticalStackLayout Spacing="4">
                         <Label Text="跳过无需代理的规则 (分号分隔)" FontSize="12" TextColor="#475569" />
-                        <Editor x:Name="TxtBypassRules" HeightRequest="60" FontSize="11" AutoSize="TextChanges" />
+                        <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,6">
+                            <Editor x:Name="TxtBypassRules" HeightRequest="60" AutoSize="TextChanges" />
+                        </Border>
                     </VerticalStackLayout>
                 </VerticalStackLayout>
             </Border>
 
-            <!-- 4. iOS 使用指引卡片 -->
-            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="#EFF6FF" Padding="16">
-                <VerticalStackLayout Spacing="8">
-                    <HorizontalStackLayout Spacing="6">
-                        <Label Text="📱" FontSize="16" />
-                        <Label Text="iOS 系统网络接入说明" FontSize="14" FontAttributes="Bold" TextColor="#1E40AF" />
+            <!-- 4. 蜂窝移动网络 (流量) 与 iOS 系统 VPN 配置专属卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="White" Padding="18">
+                <VerticalStackLayout Spacing="14">
+                    <HorizontalStackLayout Spacing="8">
+                        <Label Text="📱" FontSize="18" />
+                        <Label Text="蜂窝移动网络 (流量) 与 VPN 配置" FontSize="15" FontAttributes="Bold" TextColor="#1E293B" VerticalOptions="Center" />
                     </HorizontalStackLayout>
-                    <Label Text="• 方式 1 (Wi-Fi 代理)：打开 iOS【设置】->【无线局域网】-> 点击当前 Wi-Fi 右侧 (i) ->【配置代理】选择【手动】，服务器填 127.0.0.1，端口填 20808 即可全局加速！" FontSize="12" TextColor="#1E3A8A" LineBreakMode="WordWrap" />
-                    <Label Text="• 方式 2 (配合规则客户端)：可搭配 Shadowrocket / Surge / Loon 添加 SOCKS5 节点：地址 127.0.0.1，端口 20808，享受自动规则分流与极速体验。" FontSize="12" TextColor="#1E3A8A" LineBreakMode="WordWrap" />
+
+                    <Label Text="💡 iOS 系统在蜂窝移动网络（流量）下不提供手动代理设置，必须通过 VPN 或描述文件方可接管流量：" FontSize="12" TextColor="#64748B" LineBreakMode="WordWrap" />
+
+                    <!-- 方案 1: 写入系统 VPN -->
+                    <Border StrokeShape="RoundRectangle 10" Stroke="#E2E8F0" BackgroundColor="#F8FAFC" Padding="12">
+                        <VerticalStackLayout Spacing="8">
+                            <HorizontalStackLayout Spacing="6">
+                                <Label Text="🛡️" FontSize="14" />
+                                <Label Text="方案 1：写入 iOS 系统 VPN 配置" FontSize="13" FontAttributes="Bold" TextColor="#0F172A" />
+                            </HorizontalStackLayout>
+                            <Label Text="尝试向 iOS 系统注入 VPN 配置，成功后可在【设置 -> VPN】开启全局流量代理（需要签名包含 VPN 权限）。" FontSize="11" TextColor="#64748B" LineBreakMode="WordWrap" />
+                            <Button Text="🛡️ 写入/更新系统 VPN 配置" 
+                                    FontSize="13" 
+                                    HeightRequest="40" 
+                                    CornerRadius="8" 
+                                    BackgroundColor="#0284C7" 
+                                    TextColor="White" 
+                                    Clicked="OnConfigureSystemVpnClicked" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!-- 方案 2: 蜂窝 APN 代理描述文件 -->
+                    <Border StrokeShape="RoundRectangle 10" Stroke="#E2E8F0" BackgroundColor="#F8FAFC" Padding="12">
+                        <VerticalStackLayout Spacing="8">
+                            <HorizontalStackLayout Spacing="6">
+                                <Label Text="📥" FontSize="14" />
+                                <Label Text="方案 2：生成并安装蜂窝 APN 描述文件 (.mobileconfig)" FontSize="13" FontAttributes="Bold" TextColor="#0F172A" />
+                            </HorizontalStackLayout>
+                            <Label Text="自动生成当前端口的蜂窝 APN 代理描述文件，Safari 下载后在【设置 -> 已下载的描述文件】安装即可代理移动流量。" FontSize="11" TextColor="#64748B" LineBreakMode="WordWrap" />
+                            <Button Text="📥 生成并安装蜂窝流量描述文件" 
+                                    FontSize="13" 
+                                    HeightRequest="40" 
+                                    CornerRadius="8" 
+                                    BackgroundColor="#059669" 
+                                    TextColor="White" 
+                                    Clicked="OnInstallMobileConfigClicked" />
+                        </VerticalStackLayout>
+                    </Border>
+
+                    <!-- 方案 3: 搭配第三方规则客户端 -->
+                    <Border StrokeShape="RoundRectangle 10" Stroke="#E2E8F0" BackgroundColor="#F8FAFC" Padding="12">
+                        <VerticalStackLayout Spacing="8">
+                            <HorizontalStackLayout Spacing="6">
+                                <Label Text="🚀" FontSize="14" />
+                                <Label Text="方案 3：配合规则客户端接管流量 (推荐极速)" FontSize="13" FontAttributes="Bold" TextColor="#0F172A" />
+                            </HorizontalStackLayout>
+                            <Label Text="在 Shadowrocket / Loon / Surge / Stash 中添加本地 SOCKS5 节点（127.0.0.1:20808），直接由其虚拟网卡接管所有蜂窝流量并享受规则分流！" FontSize="11" TextColor="#64748B" LineBreakMode="WordWrap" />
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <Button Text="📋 复制 SOCKS5 节点" 
+                                        FontSize="12" 
+                                        HeightRequest="38" 
+                                        CornerRadius="8" 
+                                        BackgroundColor="#EEF2F6" 
+                                        TextColor="#334155" 
+                                        Clicked="OnCopySocks5UrlClicked" />
+                                <Button Text="🚀 一键唤起客户端" 
+                                        FontSize="12" 
+                                        HeightRequest="38" 
+                                        CornerRadius="8" 
+                                        BackgroundColor="#EEF2F6" 
+                                        TextColor="#334155" 
+                                        Clicked="OnOpenShadowrocketClicked" />
+                            </Grid>
+                        </VerticalStackLayout>
+                    </Border>
+
                 </VerticalStackLayout>
             </Border>
 
-            <!-- 5. 实时运行日志卡片 -->
+            <!-- 5. iOS Wi-Fi 接入说明卡片 -->
+            <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="#EFF6FF" Padding="16">
+                <VerticalStackLayout Spacing="8">
+                    <HorizontalStackLayout Spacing="6">
+                        <Label Text="📶" FontSize="16" />
+                        <Label Text="Wi-Fi 无线局域网接入指南" FontSize="14" FontAttributes="Bold" TextColor="#1E40AF" />
+                    </HorizontalStackLayout>
+                    <Label Text="打开 iOS【设置】->【无线局域网】-> 点击当前已连接 Wi-Fi 最右侧【(i)】-> 滑到底部【配置代理】选择【手动】-> 服务器填 127.0.0.1，端口填 20808 保存即可全局畅游！" FontSize="12" TextColor="#1E3A8A" LineBreakMode="WordWrap" />
+                </VerticalStackLayout>
+            </Border>
+
+            <!-- 6. 实时运行日志卡片 -->
             <Border StrokeShape="RoundRectangle 16" Stroke="#E2E8F0" StrokeThickness="1" BackgroundColor="#1E293B" Padding="14">
                 <VerticalStackLayout Spacing="8">
                     <Grid ColumnDefinitions="*,Auto">
