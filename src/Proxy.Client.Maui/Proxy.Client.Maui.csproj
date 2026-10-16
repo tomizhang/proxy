@@ -10,6 +10,11 @@
 		<MtouchLink Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">None</MtouchLink>
 		<EnableCodeSigning Condition="'$(EnableCodeSigning)' == ''">false</EnableCodeSigning>
 
+		<!-- 强制设置平台为 iphoneos / ios-arm64，避免在云端虚拟机中被误判为 iphonesimulator 导致 actool 寻找模拟器镜像失败 -->
+		<DevicePlatform Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">iphoneos</DevicePlatform>
+		<Platform Condition="'$(Platform)' == ''">iPhone</Platform>
+		<RuntimeIdentifier Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' and '$(RuntimeIdentifier)' == ''">ios-arm64</RuntimeIdentifier>
+
 		<!-- 当指定 BuildingForIOS 或在 macOS 上时，仅编译纯 iOS 目标 (防止触发 maccatalyst 缺失报错) -->
 		<TargetFrameworks Condition="'$(BuildingForIOS)' == 'true'">net9.0-ios</TargetFrameworks>
 		<TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net9.0-ios</TargetFrameworks>
