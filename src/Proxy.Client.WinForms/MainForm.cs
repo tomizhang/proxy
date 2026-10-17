@@ -44,6 +44,7 @@ public partial class MainForm : Form
     private TextBox _txtSni = null!;
     private TextBox _txtPassword = null!;
     private ComboBox _cboAlgo = null!;
+    private NumericUpDown _numConcurrency = null!;
     private NumericUpDown _numSocks5Port = null!;
     private CheckBox _chkEnableSystemProxy = null!;
     private CheckBox _chkEnableBypass = null!;
@@ -237,10 +238,21 @@ public partial class MainForm : Form
         _cboAlgo = new ComboBox { Location = new Point(555, 97), Width = 175, DropDownStyle = ComboBoxStyle.DropDownList };
         _cboAlgo.Items.AddRange(CryptoFactory.SupportedAlgorithms);
 
+        var lblConcurrency = new Label { Text = "并发加速通道数:", Location = new Point(12, 133), AutoSize = true };
+        _numConcurrency = new NumericUpDown { Location = new Point(195, 130), Width = 70, Minimum = 1, Maximum = 16, Value = 4 };
+        var lblConcurrencyTip = new Label
+        {
+            Text = "(多路复用连接池：单 IP 开启多条物理隧道并发传输，消除队头阻塞并突破单连接限速；支持逗号分隔多个优选 IP)",
+            Location = new Point(275, 133),
+            AutoSize = true,
+            ForeColor = Color.DarkSlateGray,
+            Font = new Font("Microsoft YaHei UI", 8.5F)
+        };
+
         var lblCdnTip = new Label
         {
             Text = "💡 优选提示：若使用 Cloudflare 优选，【节点地址】填优选 IP 或优选域名，【真实域名】填您自己的域名 (如 sg.numb.dpdns.org)；若不使用优选，两者填相同真实域名即可。",
-            Location = new Point(12, 135),
+            Location = new Point(12, 162),
             Size = new Size(730, 24),
             ForeColor = Color.DarkSlateGray,
             Font = new Font("Microsoft YaHei UI", 8.5F)
@@ -249,7 +261,7 @@ public partial class MainForm : Form
         // 快捷操作按钮条（Tab 底部）
         var pnlActions = new FlowLayoutPanel
         {
-            Location = new Point(12, 168),
+            Location = new Point(12, 195),
             Size = new Size(720, 48),
             FlowDirection = FlowDirection.LeftToRight
         };
@@ -302,6 +314,7 @@ public partial class MainForm : Form
             lblHost, _txtHost, lblPort, _numPort, _chkUseTls,
             lblPath, _txtPath, lblSni, _txtSni,
             lblPwd, _txtPassword, lblAlgo, _cboAlgo,
+            lblConcurrency, _numConcurrency, lblConcurrencyTip,
             lblCdnTip,
             pnlActions
         ]);
@@ -620,6 +633,7 @@ public partial class MainForm : Form
             _txtPassword.Text = _config.Password;
             _cboAlgo.SelectedItem = _config.Algorithm;
             if (_cboAlgo.SelectedIndex < 0 && _cboAlgo.Items.Count > 0) _cboAlgo.SelectedIndex = 0;
+            _numConcurrency.Value = Math.Clamp(_config.ConcurrencyChannels, 1, 16);
             _numSocks5Port.Value = _config.LocalSocks5Port;
             _chkEnableSystemProxy.Checked = _config.EnableSystemProxy;
             _chkEnableBypass.Checked = _config.EnableBypass;
@@ -682,6 +696,7 @@ public partial class MainForm : Form
         _config.SniHost = string.IsNullOrWhiteSpace(_txtSni.Text) ? null : _txtSni.Text.Trim();
         _config.Password = _txtPassword.Text;
         _config.Algorithm = _cboAlgo.SelectedItem?.ToString() ?? "aes-256-gcm";
+        _config.ConcurrencyChannels = (int)_numConcurrency.Value;
         _config.LocalSocks5Port = (int)_numSocks5Port.Value;
         _config.EnableSystemProxy = _chkEnableSystemProxy.Checked;
         _config.EnableBypass = _chkEnableBypass.Checked;

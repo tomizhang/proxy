@@ -134,6 +134,18 @@
                         </VerticalStackLayout>
                     </Grid>
 
+                    <!-- 多连接并发加速配置 (多路复用连接池) -->
+                    <VerticalStackLayout Spacing="4">
+                        <Grid ColumnDefinitions="*,Auto">
+                            <Label Grid.Column="0" Text="⚡ 并发加速连接数 (单IP多请求 / 多IP负载)" FontSize="12" TextColor="#475569" VerticalOptions="Center" />
+                            <Label x:Name="LblConcurrencyDesc" Grid.Column="1" Text="4 条并发通道" FontSize="11" TextColor="#0284C7" FontAttributes="Bold" VerticalOptions="Center" />
+                        </Grid>
+                        <Border StrokeShape="RoundRectangle 8" Stroke="#CBD5E1" StrokeThickness="1" BackgroundColor="#F8FAFC" Padding="10,0">
+                            <Picker x:Name="PickerConcurrency" SelectedIndexChanged="OnConcurrencyChanged" />
+                        </Border>
+                        <Label Text="💡 支持对单个优选 IP 建立多条独立物理隧道并发传输，消除队头阻塞并突破单连接限速；也可在节点地址中用逗号隔开填入多个 IP 进行负载均衡！" FontSize="10.5" TextColor="#64748B" LineBreakMode="WordWrap" />
+                    </VerticalStackLayout>
+
                     <!-- 快捷操作按钮 -->
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10" Padding="0,6,0,0">
                         <Button x:Name="BtnTestConnection"

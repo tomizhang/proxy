@@ -43,6 +43,12 @@ public class ProxyClientConfig
     public int LocalSocks5Port { get; set; } = 20808;
 
     /// <summary>
+    /// 并发连接通道数 (多路复用并发连接池，默认 4，可设置 1~16)
+    /// 无论单 IP 还是多 IP，均并发建立多条独立物理 WebSocket 隧道，突破单连接 TCP 窗口与 Cloudflare 单连接限速，彻底消除队头阻塞
+    /// </summary>
+    public int ConcurrencyChannels { get; set; } = 4;
+
+    /// <summary>
     /// 是否开启日志显示 (默认开启)
     /// </summary>
     public bool EnableLogging { get; set; } = true;

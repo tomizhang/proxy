@@ -43,6 +43,13 @@ public partial class MainPage : ContentPage
                 PickerAlgo.Items.Add(algo);
             }
 
+            // 填充并发通道数选项 (多路复用连接池)
+            PickerConcurrency.Items.Add("1 (单连接通道 - 经典)");
+            PickerConcurrency.Items.Add("2 (2 条并发通道)");
+            PickerConcurrency.Items.Add("4 (4 条并发通道 - 推荐流畅)");
+            PickerConcurrency.Items.Add("8 (8 条并发通道 - 极速狂飙)");
+            PickerConcurrency.Items.Add("16 (16 条并发通道 - 极致吞吐)");
+
             _config = LoadConfig();
             ApplyConfigToUi();
         }
@@ -127,11 +134,37 @@ public partial class MainPage : ContentPage
         int algoIndex = PickerAlgo.Items.IndexOf(_config.Algorithm);
         PickerAlgo.SelectedIndex = algoIndex >= 0 ? algoIndex : 0;
 
+        int channels = _config.ConcurrencyChannels > 0 ? _config.ConcurrencyChannels : 4;
+        switch (channels)
+        {
+            case 1: PickerConcurrency.SelectedIndex = 0; break;
+            case 2: PickerConcurrency.SelectedIndex = 1; break;
+            case 8: PickerConcurrency.SelectedIndex = 3; break;
+            case 16: PickerConcurrency.SelectedIndex = 4; break;
+            case 4:
+            default: PickerConcurrency.SelectedIndex = 2; break;
+        }
+        LblConcurrencyDesc.Text = $"{channels} 条并发通道";
+
         TxtSocks5Port.Text = _config.LocalSocks5Port.ToString();
         SwEnableBypass.IsToggled = _config.EnableBypass;
         SwFilterMode.IsToggled = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected;
         UpdateFilterModeUi(SwFilterMode.IsToggled);
         TxtBypassRules.Text = _config.BypassRules;
+    }
+
+    private void OnConcurrencyChanged(object? sender, EventArgs e)
+    {
+        int ch = PickerConcurrency.SelectedIndex switch
+        {
+            0 => 1,
+            1 => 2,
+            3 => 8,
+            4 => 16,
+            _ => 4
+        };
+        _config.ConcurrencyChannels = ch;
+        LblConcurrencyDesc.Text = $"{ch} 条并发通道";
     }
 
     private void UpdateFilterModeUi(bool isWhitelist)
@@ -172,6 +205,15 @@ public partial class MainPage : ContentPage
         _config.UseTls = SwUseTls.IsToggled;
         _config.Password = TxtPassword.Text ?? "";
         _config.Algorithm = PickerAlgo.SelectedItem?.ToString() ?? "aes-256-gcm";
+
+        _config.ConcurrencyChannels = PickerConcurrency.SelectedIndex switch
+        {
+            0 => 1,
+            1 => 2,
+            3 => 8,
+            4 => 16,
+            _ => 4
+        };
 
         _config.LocalSocks5Port = int.TryParse(TxtSocks5Port.Text, out var sp) ? sp : 20808;
         _config.EnableBypass = SwEnableBypass.IsToggled;

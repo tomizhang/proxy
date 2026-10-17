@@ -32,7 +32,7 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     {
         if (_isRunning) return;
 
-        LogMessage?.Invoke($"正在连接代理服务器: {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path}, 加密: {_config.Algorithm})...");
+        LogMessage?.Invoke($"正在连接代理服务器: {_config.ServerHost}:{_config.ServerPort} (并发连接池: {_config.ConcurrencyChannels} 条通道, 路径: {_config.Path}, 加密: {_config.Algorithm})...");
 
         // 1. 初始化传输层
         _transport = new TunnelTransport(_config);
