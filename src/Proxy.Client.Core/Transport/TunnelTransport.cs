@@ -63,7 +63,12 @@ public sealed class TunnelTransport : IAsyncDisposable
     }
 
     /// <summary>
-    /// 当前活跃连接数
+    /// 连接池总通道数
+    /// </summary>
+    public int TotalChannelCount => _channels.Length;
+
+    /// <summary>
+    /// 当前活跃可用通道数
     /// </summary>
     public int ActiveChannelCount
     {
@@ -110,32 +115,31 @@ public sealed class TunnelTransport : IAsyncDisposable
         string[] hosts = ParseHosts(_config.ServerHost);
 
         _channels = new TunnelChannel[channelCount];
-        var connectTasks = new Task[channelCount];
 
         for (int i = 0; i < channelCount; i++)
         {
             string host = hosts[i % hosts.Length];
             var channel = new TunnelChannel(i, this, host, _config.ServerPort, _config, _cts.Token);
             _channels[i] = channel;
-            connectTasks[i] = channel.StartAsync();
+            channel.Start();
         }
 
-        // 等待至少一个通道成功建立连接即可开始提供服务，其余通道后台继续重试
-        var firstSuccess = await Task.WhenAny(connectTasks);
-        try
+        // 等待最多 10 秒，只要有任意 1 个通道建连成功即可开始对外提供代理服务
+        var startTime = Stopwatch.GetTimestamp();
+        while (ActiveChannelCount == 0 && !_cts.IsCancellationRequested)
         {
-            await firstSuccess;
-            State = TransportState.Connected;
-        }
-        catch
-        {
-            // 若第一个返回的任务抛出异常，检查是否有其他通道已连上
-            if (ActiveChannelCount > 0)
+            if (Stopwatch.GetElapsedTime(startTime).TotalSeconds >= 10)
             {
-                State = TransportState.Connected;
+                break;
             }
+            try
+            {
+                await Task.Delay(100, _cts.Token);
+            }
+            catch (OperationCanceledException) { break; }
         }
 
+        OnChannelStateChanged();
         _heartbeatLoopTask = Task.Run(HeartbeatLoopAsync);
     }
 
@@ -153,34 +157,34 @@ public sealed class TunnelTransport : IAsyncDisposable
 
         if (channels.Length == 1) return channels[0];
 
-        // 1. 若会话已绑定特定通道，优先选用该通道以保持单会话内完全保序
+        // 1. 若会话已绑定特定通道，必须严格走该会话绑定的通道（远端服务端每个 WebSocket 上下文隔离，不可串发数据）
         if (_sessionChannelMap.TryGetValue(sessionId, out int boundIndex))
         {
-            var boundChannel = channels[boundIndex % channels.Length];
-            if (boundChannel.IsConnected) return boundChannel;
+            return channels[boundIndex % channels.Length];
         }
 
-        // 2. 新会话采用 SessionId 散列哈希分发通道，实现真正多路并行调度
+        // 2. 新会话采用 SessionId 散列哈希分发通道，优先选用当前健康的通道
         int targetIdx = (int)(sessionId % (ulong)channels.Length);
-        var targetChannel = channels[targetIdx];
-        if (targetChannel.IsConnected)
+        if (channels[targetIdx].IsConnected)
         {
             _sessionChannelMap[sessionId] = targetIdx;
-            return targetChannel;
+            return channels[targetIdx];
         }
 
-        // 3. 容灾兜底：若目标通道正在重连，动态故障转移至当前任意可用的健康通道
+        // 3. 容灾兜底：若目标通道正在重连，动态选择当前第一个可用的健康通道
         for (int i = 0; i < channels.Length; i++)
         {
-            if (channels[i].IsConnected)
+            int candidate = (targetIdx + i) % channels.Length;
+            if (channels[candidate].IsConnected)
             {
-                _sessionChannelMap[sessionId] = i;
-                return channels[i];
+                _sessionChannelMap[sessionId] = candidate;
+                return channels[candidate];
             }
         }
 
-        // 4. 若所有通道暂时均未 Open，返回目标通道等待其就绪
-        return targetChannel;
+        // 4. 若所有通道暂时均未就绪，记录初始分配并返回目标通道等待就绪
+        _sessionChannelMap[sessionId] = targetIdx;
+        return channels[targetIdx];
     }
 
     public async Task SendFrameAsync(ProxyFrame frame)
@@ -219,29 +223,49 @@ public sealed class TunnelTransport : IAsyncDisposable
         }
     }
 
+    internal void OnChannelConnected(int channelIndex)
+    {
+        OnChannelStateChanged();
+    }
+
+    internal void OnChannelDisconnected(int channelIndex)
+    {
+        // 查找所有绑定在该已断开通道上的旧会话，通知本地代理通道已闭合，防止本地浏览器挂起卡顿
+        foreach (var kvp in _sessionChannelMap)
+        {
+            if (kvp.Value == channelIndex)
+            {
+                if (_sessionSubscriptions.TryGetValue(kvp.Key, out var handler))
+                {
+                    try
+                    {
+                        handler(ProxyFrame.CreateClose(kvp.Key));
+                    }
+                    catch { }
+                }
+            }
+        }
+
+        OnChannelStateChanged();
+    }
+
     internal void OnChannelStateChanged()
     {
         int active = ActiveChannelCount;
-        if (active > 0)
-        {
-            State = TransportState.Connected;
-        }
-        else
-        {
-            State = TransportState.Reconnecting;
-        }
+        _state = active > 0 ? TransportState.Connected : TransportState.Reconnecting;
+        StatusChanged?.Invoke(_state, null);
     }
 
     private async Task HeartbeatLoopAsync()
     {
-        // 45 秒在所有活跃通道发送心跳 Ping，对抗 Cloudflare 100 秒无活动超时断开
+        // 15 秒在所有活跃通道发送心跳 Ping，对抗 Cloudflare 100秒无活动断开及运营商 NAT 超时
         while (!_cts.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(45), _cts.Token);
+                await Task.Delay(TimeSpan.FromSeconds(15), _cts.Token);
 
-                if (State == TransportState.Connected)
+                if (ActiveChannelCount > 0)
                 {
                     _lastPingTimestamp = Stopwatch.GetTimestamp();
                     var pingFrame = ProxyFrame.CreatePing();
@@ -252,7 +276,11 @@ public sealed class TunnelTransport : IAsyncDisposable
                     {
                         if (channel.IsConnected)
                         {
-                            _ = channel.SendAsync(encrypted);
+                            try
+                            {
+                                await channel.SendAsync(encrypted);
+                            }
+                            catch { }
                         }
                     }
                 }
@@ -282,7 +310,7 @@ public sealed class TunnelTransport : IAsyncDisposable
     }
 
     /// <summary>
-    /// 连接池中的单一物理 WebSocket 通道
+    /// 连接池中的单一物理 WebSocket 通道（具备无限持久自动恢复生命周期）
     /// </summary>
     private sealed class TunnelChannel : IAsyncDisposable
     {
@@ -317,22 +345,22 @@ public sealed class TunnelTransport : IAsyncDisposable
             _parentToken = parentToken;
         }
 
-        public async Task StartAsync()
+        public void Start()
         {
-            await ConnectWithRetryAsync();
             _receiveLoopTask = Task.Run(ReceiveLoopAsync);
         }
 
         private async Task ConnectWithRetryAsync()
         {
+            int retryDelayMs = 1000;
             while (!_parentToken.IsCancellationRequested && !_channelCts.IsCancellationRequested)
             {
                 try
                 {
-                    _webSocket?.Dispose();
+                    try { _webSocket?.Dispose(); } catch { }
                     _webSocket = new ClientWebSocket();
                     _webSocket.Options.SetBuffer(64 * 1024, 64 * 1024);
-                    _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+                    _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
 
                     string scheme = _config.UseTls ? "wss" : "ws";
                     string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
@@ -341,7 +369,7 @@ public sealed class TunnelTransport : IAsyncDisposable
                     var uri = new Uri($"{scheme}://{targetDomain}:{_targetPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
 
                     using var connectTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_parentToken, connectTimeoutCts.Token);
+                    using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_parentToken, _channelCts.Token, connectTimeoutCts.Token);
 
                     // 若配置了优选 IP/优选域名，物理 Socket 直连优选 IP，TLS 握手保持 SNI 域名
                     if (!string.IsNullOrWhiteSpace(_config.SniHost) && !string.Equals(_config.SniHost.Trim(), _targetHost.Trim(), StringComparison.OrdinalIgnoreCase))
@@ -368,13 +396,29 @@ public sealed class TunnelTransport : IAsyncDisposable
                         await _webSocket.ConnectAsync(uri, linkedCts.Token);
                     }
 
-                    _parent.OnChannelStateChanged();
+                    if (_webSocket.State == WebSocketState.Open)
+                    {
+                        _parent.OnChannelConnected(_channelIndex);
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) when (_parentToken.IsCancellationRequested || _channelCts.IsCancellationRequested)
+                {
                     return;
                 }
                 catch
                 {
-                    _parent.OnChannelStateChanged();
-                    await Task.Delay(3000, _parentToken);
+                    _parent.OnChannelDisconnected(_channelIndex);
+                }
+
+                try
+                {
+                    await Task.Delay(retryDelayMs, _channelCts.Token);
+                    retryDelayMs = Math.Min(retryDelayMs * 2, 8000);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
             }
         }
@@ -388,52 +432,67 @@ public sealed class TunnelTransport : IAsyncDisposable
             {
                 while (!_parentToken.IsCancellationRequested && !_channelCts.IsCancellationRequested)
                 {
-                    if (_webSocket == null || _webSocket.State != WebSocketState.Open)
+                    try
                     {
-                        _parent.OnChannelStateChanged();
-                        await ConnectWithRetryAsync();
-                        continue;
+                        if (_webSocket == null || _webSocket.State != WebSocketState.Open)
+                        {
+                            _parent.OnChannelDisconnected(_channelIndex);
+                            await ConnectWithRetryAsync();
+                            continue;
+                        }
+
+                        messageStream.SetLength(0);
+                        ValueWebSocketReceiveResult result;
+
+                        do
+                        {
+                            result = await _webSocket.ReceiveAsync(buffer.AsMemory(), _channelCts.Token);
+                            if (result.MessageType == WebSocketMessageType.Close) break;
+                            messageStream.Write(buffer, 0, result.Count);
+                        }
+                        while (!result.EndOfMessage);
+
+                        if (result.MessageType == WebSocketMessageType.Close)
+                        {
+                            _parent.OnChannelDisconnected(_channelIndex);
+                            await ConnectWithRetryAsync();
+                            continue;
+                        }
+
+                        if (result.MessageType == WebSocketMessageType.Binary && messageStream.Length > 0)
+                        {
+                            byte[] encryptedData = messageStream.ToArray();
+                            _parent.OnTraffic(0, encryptedData.Length);
+
+                            try
+                            {
+                                byte[] decrypted = _parent._crypto.Decrypt(encryptedData);
+                                if (ProxyFrame.TryDeserialize(decrypted, out var frame) && frame != null)
+                                {
+                                    _parent.OnFrameReceived(frame);
+                                }
+                            }
+                            catch { }
+                        }
                     }
-
-                    messageStream.SetLength(0);
-                    ValueWebSocketReceiveResult result;
-
-                    do
+                    catch (OperationCanceledException) when (_parentToken.IsCancellationRequested || _channelCts.IsCancellationRequested)
                     {
-                        result = await _webSocket.ReceiveAsync(buffer.AsMemory(), _parentToken);
-                        if (result.MessageType == WebSocketMessageType.Close) break;
-                        messageStream.Write(buffer, 0, result.Count);
+                        break;
                     }
-                    while (!result.EndOfMessage);
-
-                    if (result.MessageType == WebSocketMessageType.Close)
+                    catch (Exception)
                     {
-                        _parent.OnChannelStateChanged();
-                        await ConnectWithRetryAsync();
-                        continue;
-                    }
-
-                    if (result.MessageType == WebSocketMessageType.Binary && messageStream.Length > 0)
-                    {
-                        byte[] encryptedData = messageStream.ToArray();
-                        _parent.OnTraffic(0, encryptedData.Length);
-
+                        // 遇到任何网络异常、TCP RST、CDN 边缘断开等，捕获并自动进入重连，绝对不让工作线程退出！
+                        _parent.OnChannelDisconnected(_channelIndex);
                         try
                         {
-                            byte[] decrypted = _parent._crypto.Decrypt(encryptedData);
-                            if (ProxyFrame.TryDeserialize(decrypted, out var frame) && frame != null)
-                            {
-                                _parent.OnFrameReceived(frame);
-                            }
+                            _webSocket?.Dispose();
+                            _webSocket = null;
                         }
                         catch { }
+
+                        await ConnectWithRetryAsync();
                     }
                 }
-            }
-            catch (OperationCanceledException) { }
-            catch
-            {
-                _parent.OnChannelStateChanged();
             }
             finally
             {
@@ -443,12 +502,24 @@ public sealed class TunnelTransport : IAsyncDisposable
 
         public async Task SendAsync(byte[] encryptedData)
         {
-            if (_disposed || _webSocket == null || _webSocket.State != WebSocketState.Open) return;
+            if (_disposed) return;
+
+            // 若通道短暂重连中，最多等待 1.5 秒
+            for (int i = 0; i < 15 && !IsConnected && !_parentToken.IsCancellationRequested && !_channelCts.IsCancellationRequested; i++)
+            {
+                try
+                {
+                    await Task.Delay(100, _channelCts.Token);
+                }
+                catch (OperationCanceledException) { return; }
+            }
+
+            if (!IsConnected) return;
 
             await _sendLock.WaitAsync(_parentToken);
             try
             {
-                if (_webSocket.State == WebSocketState.Open)
+                if (_webSocket?.State == WebSocketState.Open)
                 {
                     await _webSocket.SendAsync(
                         encryptedData.AsMemory(),
@@ -458,6 +529,12 @@ public sealed class TunnelTransport : IAsyncDisposable
 
                     _parent.OnTraffic(encryptedData.Length, 0);
                 }
+            }
+            catch (Exception)
+            {
+                try { _webSocket?.Abort(); } catch { }
+                _parent.OnChannelDisconnected(_channelIndex);
+                throw;
             }
             finally
             {

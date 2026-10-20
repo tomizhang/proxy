@@ -22,6 +22,8 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     public event Action<string>? LogMessage;
 
     public bool IsRunning => _isRunning;
+    public int ActiveChannelCount => _transport?.ActiveChannelCount ?? 0;
+    public int TotalChannelCount => _transport?.TotalChannelCount ?? 0;
 
     public ProxyClientEngine(ProxyClientConfig config)
     {

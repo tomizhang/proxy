@@ -329,7 +329,11 @@ public partial class MainPage : ContentPage
 
             case TransportState.Connected:
                 StatusDot.TextColor = Color.FromArgb("#16A34A");
-                StatusText.Text = "已安全连接 (SOCKS5/HTTP 运行中)";
+                int totalCh = _engine?.TotalChannelCount ?? 1;
+                int actCh = _engine?.ActiveChannelCount ?? 1;
+                StatusText.Text = totalCh > 1
+                    ? $"已安全连接 ({actCh}/{totalCh} 条并发加速通道)"
+                    : "已安全连接 (SOCKS5/HTTP 运行中)";
                 BtnConnect.Text = "⏹ 点击断开";
                 BtnConnect.BackgroundColor = Color.FromArgb("#DC2626");
                 break;

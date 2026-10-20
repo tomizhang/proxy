@@ -1134,7 +1134,11 @@ public partial class MainForm : Form
                 break;
             case TransportState.Connected:
                 _lblStatusDot.ForeColor = Color.FromArgb(16, 124, 65);
-                _lblStatusText.Text = "已连接 (代理保护中)";
+                int totalCh = _engine?.TotalChannelCount ?? 1;
+                int actCh = _engine?.ActiveChannelCount ?? 1;
+                _lblStatusText.Text = totalCh > 1
+                    ? $"已连接 ({actCh}/{totalCh} 条多路并发通道运行中)"
+                    : "已连接 (代理保护中)";
                 break;
             case TransportState.Reconnecting:
                 _lblStatusDot.ForeColor = Color.FromArgb(216, 59, 1);
