@@ -38,7 +38,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
         _config = config;
         _transport = transport;
         _bypassManager = new BypassManager(config.BypassRules);
-        _processBypassManager = new ProcessBypassManager(config.BypassProcessList);
+        _processBypassManager = new ProcessBypassManager(config.GetActiveProcessList());
 
         try
         {
@@ -572,6 +572,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
         {
             _config.ProcessFilterMode = mode.Value;
         }
+        _config.SetActiveProcessList(bypassProcessList);
         _processBypassManager.ParseProcessList(bypassProcessList);
     }
 

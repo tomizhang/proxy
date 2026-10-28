@@ -89,14 +89,14 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     /// </summary>
     public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null, ProcessProxyMode? mode = null)
     {
-        _config.BypassProcessList = bypassProcessList;
-        if (enabled.HasValue)
-        {
-            _config.EnableProcessBypass = enabled.Value;
-        }
         if (mode.HasValue)
         {
             _config.ProcessFilterMode = mode.Value;
+        }
+        _config.SetActiveProcessList(bypassProcessList);
+        if (enabled.HasValue)
+        {
+            _config.EnableProcessBypass = enabled.Value;
         }
         _socks5Server?.UpdateProcessBypass(bypassProcessList, enabled, mode);
     }

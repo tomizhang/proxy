@@ -63,20 +63,51 @@ public class ProxyClientConfig
     /// </summary>
     public string BypassRules { get; set; } = "*.baidu.com;*.qq.com;*.taobao.com;*.jd.com;*.alipay.com;*.bilibili.com;*.163.com;*.zhihu.com;*.weibo.com;*.sina.com.cn;*.sohu.com;*.cn;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>";
 
+    public const string DefaultBlacklistProcesses = "rustdesk.exe;wechat.exe;qq.exe;dingtalk.exe;feishu.exe;baidunetdisk.exe;steam.exe";
+    public const string DefaultWhitelistProcesses = "chrome.exe;msedge.exe;firefox.exe;brave.exe;telegram.exe;discord.exe;git.exe;curl.exe";
+
     /// <summary>
     /// 是否开启程序名单分流过滤 (可选择“仅直连选中的应用”或“只为选中的应用进行代理”)
     /// </summary>
     public bool EnableProcessBypass { get; set; } = true;
 
     /// <summary>
-    /// 程序名单分流过滤模式 (BypassSelected: 仅直连选中的应用; ProxySelected: 只为选中的应用进行代理)
+    /// 程序名单分流过滤模式 (BypassSelected: 仅直连选中的应用[黑名单]; ProxySelected: 只为选中的应用进行代理[白名单])
     /// </summary>
     public ProcessProxyMode ProcessFilterMode { get; set; } = ProcessProxyMode.BypassSelected;
 
     /// <summary>
-    /// 选中的程序名单 (分号或逗号分隔，如 rustdesk.exe;wechat.exe;qq.exe;steam.exe)
+    /// 黑名单模式下的程序名单 (勾选直连排除)
     /// </summary>
-    public string BypassProcessList { get; set; } = "rustdesk.exe;wechat.exe;qq.exe;dingtalk.exe;feishu.exe;baidunetdisk.exe;steam.exe";
+    public string BypassProcessList { get; set; } = DefaultBlacklistProcesses;
+
+    /// <summary>
+    /// 白名单模式下的程序名单 (勾选走代理)
+    /// </summary>
+    public string ProxyProcessList { get; set; } = DefaultWhitelistProcesses;
+
+    /// <summary>
+    /// 获取当前模式下生效的程序名单 (实现黑白名单各自独立隔离)
+    /// </summary>
+    public string GetActiveProcessList()
+    {
+        return ProcessFilterMode == ProcessProxyMode.ProxySelected ? ProxyProcessList : BypassProcessList;
+    }
+
+    /// <summary>
+    /// 设置当前模式下的程序名单
+    /// </summary>
+    public void SetActiveProcessList(string list)
+    {
+        if (ProcessFilterMode == ProcessProxyMode.ProxySelected)
+        {
+            ProxyProcessList = list;
+        }
+        else
+        {
+            BypassProcessList = list;
+        }
+    }
 
     /// <summary>
     /// 是否自动设置 Windows 系统代理 (默认 true，免插件全局浏览)

@@ -55,6 +55,7 @@ public partial class MainForm : Form
     private Button _btnModeBlacklist = null!;
     private Button _btnModeWhitelist = null!;
     private Button _btnToggleMode = null!;
+    private Button _btnResetProc = null!;
     private Label _lblProcessTip = null!;
     private CheckedListBox _clbProcesses = null!;
     private CheckBox _chkEnableTun = null!;
@@ -431,12 +432,7 @@ public partial class MainForm : Form
             Cursor = Cursors.Hand
         };
         _btnModeBlacklist.FlatAppearance.BorderSize = 0;
-        _btnModeBlacklist.Click += (s, e) =>
-        {
-            if (_isLoadingConfig || _config.ProcessFilterMode == ProcessProxyMode.BypassSelected) return;
-            UpdateModeSwitchUi(ProcessProxyMode.BypassSelected);
-            ApplyProcessBypassImmediately();
-        };
+        _btnModeBlacklist.Click += (s, e) => SwitchFilterMode(ProcessProxyMode.BypassSelected);
 
         _btnModeWhitelist = new Button
         {
@@ -447,12 +443,7 @@ public partial class MainForm : Form
             Cursor = Cursors.Hand
         };
         _btnModeWhitelist.FlatAppearance.BorderSize = 0;
-        _btnModeWhitelist.Click += (s, e) =>
-        {
-            if (_isLoadingConfig || _config.ProcessFilterMode == ProcessProxyMode.ProxySelected) return;
-            UpdateModeSwitchUi(ProcessProxyMode.ProxySelected);
-            ApplyProcessBypassImmediately();
-        };
+        _btnModeWhitelist.Click += (s, e) => SwitchFilterMode(ProcessProxyMode.ProxySelected);
 
         _btnToggleMode = new Button
         {
@@ -472,8 +463,7 @@ public partial class MainForm : Form
             var nextMode = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected
                 ? ProcessProxyMode.BypassSelected
                 : ProcessProxyMode.ProxySelected;
-            UpdateModeSwitchUi(nextMode);
-            ApplyProcessBypassImmediately();
+            SwitchFilterMode(nextMode);
         };
 
         pnlSwitch.Controls.AddRange([lblSwitchTitle, _btnModeBlacklist, _btnModeWhitelist, _btnToggleMode]);
@@ -535,7 +525,7 @@ public partial class MainForm : Form
         };
         btnRemoveProc.Click += OnRemoveProcessClicked;
 
-        var btnResetProc = new Button
+        _btnResetProc = new Button
         {
             Text = "🔄 恢复推荐",
             Location = new Point(90, 76),
@@ -543,7 +533,7 @@ public partial class MainForm : Form
             BackColor = Color.FromArgb(240, 243, 246),
             Cursor = Cursors.Hand
         };
-        btnResetProc.Click += OnResetDefaultProcessesClicked;
+        _btnResetProc.Click += OnResetDefaultProcessesClicked;
 
         var btnSelectAllProc = new Button
         {
@@ -566,7 +556,7 @@ public partial class MainForm : Form
         btnUnselectAllProc.Click += (s, e) => SetClbAllChecked(false);
 
         pnlProcButtons.Controls.AddRange([
-            btnAddRunning, btnBrowseExe, btnRemoveProc, btnResetProc, btnSelectAllProc, btnUnselectAllProc
+            btnAddRunning, btnBrowseExe, btnRemoveProc, _btnResetProc, btnSelectAllProc, btnUnselectAllProc
         ]);
 
         tabProcess.Controls.AddRange([
@@ -653,7 +643,7 @@ public partial class MainForm : Form
             _chkEnableLogs.Checked = _config.EnableLogging;
             _chkEnableProcessBypass.Checked = _config.EnableProcessBypass;
             UpdateModeSwitchUi(_config.ProcessFilterMode);
-            PopulateClbFromConfig(_config.BypassProcessList);
+            PopulateClbFromConfig(_config.GetActiveProcessList());
         }
         finally
         {
@@ -678,8 +668,9 @@ public partial class MainForm : Form
             _btnModeWhitelist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold);
 
             _btnToggleMode.Text = "🔀 切为【黑名单模式】";
-            _lblProcessTip.Text = "💡 提示：【🚀 白名单模式】生效中！仅勾选的程序网络走代理隧道，其余所有未勾选的程序一律直连本地网络。";
+            _lblProcessTip.Text = "💡 提示：【🚀 白名单模式】生效中！独立编辑白名单：仅勾选的程序网络走代理隧道，其余所有未勾选程序一律直连。";
             _lblProcessTip.ForeColor = Color.FromArgb(0, 102, 204);
+            if (_btnResetProc != null) _btnResetProc.Text = "🔄 推荐白名单";
         }
         else
         {
@@ -693,9 +684,59 @@ public partial class MainForm : Form
             _btnModeWhitelist.Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular);
 
             _btnToggleMode.Text = "🔀 切为【白名单模式】";
-            _lblProcessTip.Text = "💡 提示：【🛡️ 黑名单模式】生效中！名单中勾选的程序（如微信、QQ、RustDesk、网盘）直连本地网络，其余所有程序走代理。";
+            _lblProcessTip.Text = "💡 提示：【🛡️ 黑名单模式】生效中！独立编辑黑名单：勾选的程序（如微信、QQ、RustDesk、网盘）直连本地，其余程序走代理。";
             _lblProcessTip.ForeColor = Color.FromArgb(16, 124, 65);
+            if (_btnResetProc != null) _btnResetProc.Text = "🔄 推荐黑名单";
         }
+    }
+
+    /// <summary>
+    /// 切换黑白名单模式，严格确保黑白名单各自独立隔离并热生效
+    /// </summary>
+    private void SwitchFilterMode(ProcessProxyMode targetMode)
+    {
+        if (_isLoadingConfig || _config.ProcessFilterMode == targetMode) return;
+
+        // 1. 将当前列表勾选状态保存到旧模式的名单中
+        SaveCurrentClbToConfig();
+
+        // 2. 切换模式并更新外观
+        _config.ProcessFilterMode = targetMode;
+        UpdateModeSwitchUi(targetMode);
+
+        // 3. 独立加载新模式的名单到 CheckedListBox
+        _isLoadingConfig = true;
+        try
+        {
+            _clbProcesses.Items.Clear();
+            PopulateClbFromConfig(_config.GetActiveProcessList());
+        }
+        finally
+        {
+            _isLoadingConfig = false;
+        }
+
+        // 4. 持久化并通知引擎热生效
+        ConfigManager.Save(_config);
+        if (_engine != null && _engine.IsRunning)
+        {
+            _engine.UpdateProcessBypass(_config.GetActiveProcessList(), _config.EnableProcessBypass, _config.ProcessFilterMode);
+            int activeCount = _clbProcesses.CheckedItems.Count;
+            string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单模式 (只代理选中应用)" : "黑名单模式 (仅直连排除选中应用)";
+            AppendLog($"🔀 [模式切换] 已独立切换为【{modeDesc}】，当前模式包含 {activeCount} 个已生效程序！");
+        }
+    }
+
+    private void SaveCurrentClbToConfig()
+    {
+        var procTokens = new List<string>();
+        for (int i = 0; i < _clbProcesses.Items.Count; i++)
+        {
+            string item = _clbProcesses.Items[i].ToString()!;
+            bool isChecked = _clbProcesses.GetItemChecked(i);
+            procTokens.Add(isChecked ? item : "!" + item);
+        }
+        _config.SetActiveProcessList(string.Join(";", procTokens));
     }
 
     private void SaveUiToConfig()
@@ -716,20 +757,12 @@ public partial class MainForm : Form
         _config.EnableLogging = _chkEnableLogs.Checked;
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
 
-        var procTokens = new List<string>();
-        for (int i = 0; i < _clbProcesses.Items.Count; i++)
-        {
-            string item = _clbProcesses.Items[i].ToString()!;
-            bool isChecked = _clbProcesses.GetItemChecked(i);
-            procTokens.Add(isChecked ? item : "!" + item);
-        }
-        _config.BypassProcessList = string.Join(";", procTokens);
-
+        SaveCurrentClbToConfig();
         ConfigManager.Save(_config);
 
         if (_engine != null && _engine.IsRunning)
         {
-            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass, _config.ProcessFilterMode);
+            _engine.UpdateProcessBypass(_config.GetActiveProcessList(), _config.EnableProcessBypass, _config.ProcessFilterMode);
         }
 
         AppendLog("✅ 配置已成功保存！");
@@ -748,31 +781,22 @@ public partial class MainForm : Form
     }
 
     /// <summary>
-    /// 即时保存并应用程序直连分流设置，若当前代理正在运行则立刻动态生效，无需重启重连
+    /// 即时保存并应用程序分流设置，若当前代理正在运行则立刻动态生效，无需重启重连
     /// </summary>
     private void ApplyProcessBypassImmediately()
     {
         if (_isLoadingConfig) return;
 
         _config.EnableProcessBypass = _chkEnableProcessBypass.Checked;
-
-        var procTokens = new List<string>();
-        for (int i = 0; i < _clbProcesses.Items.Count; i++)
-        {
-            string item = _clbProcesses.Items[i].ToString()!;
-            bool isChecked = _clbProcesses.GetItemChecked(i);
-            procTokens.Add(isChecked ? item : "!" + item);
-        }
-        _config.BypassProcessList = string.Join(";", procTokens);
-
+        SaveCurrentClbToConfig();
         ConfigManager.Save(_config);
 
         if (_engine != null && _engine.IsRunning)
         {
-            _engine.UpdateProcessBypass(_config.BypassProcessList, _config.EnableProcessBypass, _config.ProcessFilterMode);
+            _engine.UpdateProcessBypass(_config.GetActiveProcessList(), _config.EnableProcessBypass, _config.ProcessFilterMode);
             int activeCount = _clbProcesses.CheckedItems.Count;
-            string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "只为选中的应用进行代理" : "仅直连选中的应用";
-            AppendLog($"⚡ [即时生效] 应用分流已动态更新 (当前模式: {modeDesc}，选中 {activeCount} 个应用)！");
+            string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单模式 (只为选中的应用进行代理)" : "黑名单模式 (仅直连选中的应用)";
+            AppendLog($"⚡ [即时生效] 已更新【{modeDesc}】名单，当前选中 {activeCount} 个应用！");
         }
     }
 
@@ -799,10 +823,11 @@ public partial class MainForm : Form
 
     private void OnBrowseExeClicked(object? sender, EventArgs e)
     {
+        string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "走代理" : "直连不走代理";
         using var ofd = new OpenFileDialog
         {
             Filter = "可执行文件 (*.exe)|*.exe|所有文件 (*.*)|*.*",
-            Title = "选择需要直连不走代理的应用程序 (.exe)",
+            Title = $"选择需要{modeDesc}的应用程序 (.exe)",
             Multiselect = true
         };
         if (ofd.ShowDialog(this) == DialogResult.OK)
@@ -819,7 +844,8 @@ public partial class MainForm : Form
             if (addedCount > 0)
             {
                 ApplyProcessBypassImmediately();
-                AppendLog($"✅ 已浏览添加 {addedCount} 个程序，已即时生效！");
+                string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+                AppendLog($"✅ 已浏览添加 {addedCount} 个程序到【{listType}】，已即时生效！");
             }
         }
     }
@@ -838,16 +864,20 @@ public partial class MainForm : Form
             _clbProcesses.Items.RemoveAt(idx);
         }
         ApplyProcessBypassImmediately();
-        AppendLog("✅ 已从直连名单中移除所选程序，已即时生效。");
+        string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+        AppendLog($"✅ 已从【{listType}】中移除所选程序，已即时生效。");
     }
 
     private void OnResetDefaultProcessesClicked(object? sender, EventArgs e)
     {
         _clbProcesses.Items.Clear();
-        string defaults = "rustdesk.exe;wechat.exe;qq.exe;dingtalk.exe;feishu.exe;baidunetdisk.exe;steam.exe";
+        string defaults = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected
+            ? ProxyClientConfig.DefaultWhitelistProcesses
+            : ProxyClientConfig.DefaultBlacklistProcesses;
         PopulateClbFromConfig(defaults);
         ApplyProcessBypassImmediately();
-        AppendLog("🔄 已恢复推荐的常用直连程序名单，已即时生效！");
+        string modeName = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单代理" : "黑名单直连";
+        AppendLog($"🔄 已恢复推荐的常用【{modeName}】程序名单，已即时生效！");
     }
 
     private void SetClbAllChecked(bool isChecked)
