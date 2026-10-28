@@ -60,7 +60,7 @@ public partial class MainForm : Form
     private CheckedListBox _clbProcesses = null!;
     private CheckBox _chkEnableTun = null!;
     private CheckBox _chkEnableLogs = null!;
-    private RichTextBox _rtbLogs = null!;
+    private SilentRichTextBox _rtbLogs = null!;
     private bool _isLoadingConfig = true;
 
     public MainForm()
@@ -588,8 +588,8 @@ public partial class MainForm : Form
         _chkEnableLogs.CheckedChanged += (s, e) =>
         {
             _config.EnableLogging = _chkEnableLogs.Checked;
-            if (!_chkEnableLogs.Checked) _rtbLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] ℹ️ 实时日志输出已暂停显示。\n");
-            else _rtbLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] ℹ️ 实时日志输出已恢复显示。\n");
+            if (!_chkEnableLogs.Checked) _rtbLogs.AppendBatch($"[{DateTime.Now:HH:mm:ss}] ℹ️ 实时日志输出已暂停显示。\n");
+            else _rtbLogs.AppendBatch($"[{DateTime.Now:HH:mm:ss}] ℹ️ 实时日志输出已恢复显示。\n");
         };
 
         var btnClearLog = new Button { Text = "清空日志", Dock = DockStyle.Right, Width = 80, Height = 28 };
@@ -600,7 +600,7 @@ public partial class MainForm : Form
         };
         logHeaderPanel.Controls.AddRange([lblLogTitle, _chkEnableLogs, btnClearLog]);
 
-        _rtbLogs = new RichTextBox
+        _rtbLogs = new SilentRichTextBox
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
@@ -1238,15 +1238,8 @@ public partial class MainForm : Form
 
         if (sb.Length == 0) return;
 
-        // 保持 RichTextBox 文本长度在合理区间 (约 1000 行)，严禁使用 _rtbLogs.Text.Length (该属性会导致全量字符复制并分配大对象引发 Full GC)
-        int currentLength = _rtbLogs.TextLength;
-        if (currentLength > 80_000)
-        {
-            _rtbLogs.Select(0, 20_000);
-            _rtbLogs.SelectedText = string.Empty;
-        }
-
-        _rtbLogs.AppendText(sb.ToString());
+        // 使用 SilentRichTextBox 进行静音、防卡顿、防闪烁的批量写入与旧日志平滑修剪
+        _rtbLogs.AppendBatch(sb.ToString());
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
