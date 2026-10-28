@@ -185,13 +185,25 @@ public sealed class ProcessBypassManager
             return cached.Name;
         }
 
+        // 定期惰性修剪过期缓存，防止字典持续堆积
+        if (_portCache.Count > 300)
+        {
+            foreach (var kvp in _portCache)
+            {
+                if (kvp.Value.Expiry < now)
+                {
+                    _portCache.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
         int pid = GetPidByLocalPort(localPort);
         if (pid <= 0) return null;
 
         string? name = GetProcessNameByPid(pid);
         if (!string.IsNullOrEmpty(name))
         {
-            _portCache[localPort] = (pid, name, now.AddSeconds(2));
+            _portCache[localPort] = (pid, name, now.AddSeconds(5));
         }
 
         return name;
@@ -233,11 +245,22 @@ public sealed class ProcessBypassManager
             return cached.Name;
         }
 
+        if (_pidNameCache.Count > 100)
+        {
+            foreach (var kvp in _pidNameCache)
+            {
+                if (kvp.Value.Expiry < now)
+                {
+                    _pidNameCache.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
         try
         {
             using var proc = Process.GetProcessById(pid);
             string name = proc.ProcessName;
-            _pidNameCache[pid] = (name, now.AddSeconds(10));
+            _pidNameCache[pid] = (name, now.AddSeconds(30));
             return name;
         }
         catch

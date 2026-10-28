@@ -19,6 +19,8 @@ public partial class MainForm : Form
     private ProxyClientConfig _config;
     private ProxyClientEngine? _engine;
     private readonly System.Windows.Forms.Timer _speedTimer;
+    private readonly System.Windows.Forms.Timer _logFlushTimer;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQueue = new();
     private readonly NotifyIcon _trayIcon;
 
     private long _lastUploadBytes;
@@ -72,6 +74,11 @@ public partial class MainForm : Form
             // 速度刷新定时器 (1秒)
             _speedTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             _speedTimer.Tick += OnSpeedTimerTick;
+
+            // 日志批量异步刷新定时器 (150ms)，彻底解决长时间代理后高频日志引发的界面卡死
+            _logFlushTimer = new System.Windows.Forms.Timer { Interval = 150 };
+            _logFlushTimer.Tick += OnLogFlushTimerTick;
+            _logFlushTimer.Start();
 
             // 托盘图标
             _trayIcon = new NotifyIcon
@@ -596,7 +603,11 @@ public partial class MainForm : Form
         };
 
         var btnClearLog = new Button { Text = "清空日志", Dock = DockStyle.Right, Width = 80, Height = 28 };
-        btnClearLog.Click += (s, e) => _rtbLogs.Clear();
+        btnClearLog.Click += (s, e) =>
+        {
+            while (_logQueue.TryDequeue(out _)) { }
+            _rtbLogs.Clear();
+        };
         logHeaderPanel.Controls.AddRange([lblLogTitle, _chkEnableLogs, btnClearLog]);
 
         _rtbLogs = new RichTextBox
@@ -983,14 +994,14 @@ public partial class MainForm : Form
         UpdateConnectButtonsState(isConnecting: true);
 
         _engine = new ProxyClientEngine(_config);
-        _engine.StatusChanged += (state, err) => Invoke(() => UpdateConnectionStatus(state, err));
-        _engine.LatencyUpdated += ms => Invoke(() => _lblLatency.Text = $"延迟: {ms} ms");
+        _engine.StatusChanged += (state, err) => SafeBeginInvoke(() => UpdateConnectionStatus(state, err));
+        _engine.LatencyUpdated += ms => SafeBeginInvoke(() => _lblLatency.Text = $"延迟: {ms} ms");
         _engine.TrafficUpdated += (up, down) =>
         {
             _currentTotalUpload = up;
             _currentTotalDownload = down;
         };
-        _engine.LogMessage += msg => Invoke(() => AppendLog(msg));
+        _engine.LogMessage += msg => AppendLog(msg);
 
         _speedTimer.Start();
         await _engine.StartAsync();
@@ -1158,15 +1169,18 @@ public partial class MainForm : Form
 
     private void OnSpeedTimerTick(object? sender, EventArgs e)
     {
-        long deltaUp = _currentTotalUpload - _lastUploadBytes;
-        long deltaDown = _currentTotalDownload - _lastDownloadBytes;
-        _lastUploadBytes = _currentTotalUpload;
-        _lastDownloadBytes = _currentTotalDownload;
+        long curUp = _engine?.TotalUploadBytes ?? _currentTotalUpload;
+        long curDown = _engine?.TotalDownloadBytes ?? _currentTotalDownload;
+
+        long deltaUp = curUp - _lastUploadBytes;
+        long deltaDown = curDown - _lastDownloadBytes;
+        _lastUploadBytes = curUp;
+        _lastDownloadBytes = curDown;
 
         double upKb = deltaUp / 1024.0;
         double downKb = deltaDown / 1024.0;
-        double totalUpMb = _currentTotalUpload / (1024.0 * 1024.0);
-        double totalDownMb = _currentTotalDownload / (1024.0 * 1024.0);
+        double totalUpMb = curUp / (1024.0 * 1024.0);
+        double totalDownMb = curDown / (1024.0 * 1024.0);
 
         _lblSpeedUp.Text = $"↑ {upKb:F1} KB/s ({totalUpMb:F1} MB)";
         _lblSpeedDown.Text = $"↓ {downKb:F1} KB/s ({totalDownMb:F1} MB)";
@@ -1175,10 +1189,32 @@ public partial class MainForm : Form
     private void AppendLog(string message)
     {
         if (_chkEnableLogs != null && !_chkEnableLogs.Checked) return;
-        string line = $"[{DateTime.Now:HH:mm:ss}] {message}\n";
-        _rtbLogs.AppendText(line);
-        _rtbLogs.SelectionStart = _rtbLogs.Text.Length;
-        _rtbLogs.ScrollToCaret();
+        _logQueue.Enqueue($"[{DateTime.Now:HH:mm:ss}] {message}");
+    }
+
+    private void OnLogFlushTimerTick(object? sender, EventArgs e)
+    {
+        if (_logQueue.IsEmpty || !IsHandleCreated || IsDisposed) return;
+
+        var sb = new System.Text.StringBuilder();
+        int count = 0;
+        while (_logQueue.TryDequeue(out var line) && count < 100)
+        {
+            sb.AppendLine(line);
+            count++;
+        }
+
+        if (sb.Length == 0) return;
+
+        // 保持 RichTextBox 文本长度在合理区间 (约 1000 行)，严禁使用 _rtbLogs.Text.Length (该属性会导致全量字符复制并分配大对象引发 Full GC)
+        int currentLength = _rtbLogs.TextLength;
+        if (currentLength > 80_000)
+        {
+            _rtbLogs.Select(0, 20_000);
+            _rtbLogs.SelectedText = string.Empty;
+        }
+
+        _rtbLogs.AppendText(sb.ToString());
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -1196,6 +1232,8 @@ public partial class MainForm : Form
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _speedTimer.Dispose();
+        _logFlushTimer.Stop();
+        _logFlushTimer.Dispose();
 
         if (_engine != null)
         {

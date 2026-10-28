@@ -48,6 +48,10 @@ public sealed class TunnelTransport : IAsyncDisposable
     private long _totalUploadBytes;
     private long _totalDownloadBytes;
     private long _lastPingTimestamp;
+    private long _lastTrafficNotifyTicks;
+
+    public long TotalUploadBytes => Volatile.Read(ref _totalUploadBytes);
+    public long TotalDownloadBytes => Volatile.Read(ref _totalDownloadBytes);
 
     public TransportState State
     {
@@ -202,7 +206,14 @@ public sealed class TunnelTransport : IAsyncDisposable
     {
         if (uploadBytes > 0) Interlocked.Add(ref _totalUploadBytes, uploadBytes);
         if (downloadBytes > 0) Interlocked.Add(ref _totalDownloadBytes, downloadBytes);
-        TrafficUpdated?.Invoke(_totalUploadBytes, _totalDownloadBytes);
+
+        // 节流 TrafficUpdated 事件：最多每 250ms 触发一次，彻底避免每秒成千上万次跨线程事件引发的 CPU 颠簸
+        long now = Stopwatch.GetTimestamp();
+        if (Stopwatch.GetElapsedTime(Volatile.Read(ref _lastTrafficNotifyTicks)).TotalMilliseconds >= 250)
+        {
+            Volatile.Write(ref _lastTrafficNotifyTicks, now);
+            TrafficUpdated?.Invoke(_totalUploadBytes, _totalDownloadBytes);
+        }
     }
 
     internal void OnFrameReceived(ProxyFrame frame)

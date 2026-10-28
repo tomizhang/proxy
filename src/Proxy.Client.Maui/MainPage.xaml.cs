@@ -31,6 +31,9 @@ public partial class MainPage : ContentPage
     private long _currentTotalUpload;
     private long _currentTotalDownload;
 
+    private readonly Queue<string> _recentLogs = new(100);
+    private bool _logUpdateScheduled;
+
     public MainPage()
     {
         try
@@ -621,27 +624,35 @@ public partial class MainPage : ContentPage
         string timestamp = DateTime.Now.ToString("HH:mm:ss");
         string line = $"[{timestamp}] {message}";
 
-        if (string.IsNullOrEmpty(LblLogs.Text) || LblLogs.Text.StartsWith("[就绪]"))
+        lock (_recentLogs)
         {
-            LblLogs.Text = line;
+            if (_recentLogs.Count >= 80)
+            {
+                _recentLogs.Dequeue();
+            }
+            _recentLogs.Enqueue(line);
+
+            if (_logUpdateScheduled) return;
+            _logUpdateScheduled = true;
         }
-        else
+
+        // 节流刷新：以 150ms 频率批量刷新 UI，杜绝单条高频更新导致的 XAML 重新排版与内存碎片
+        Dispatcher.DispatchDelayed(TimeSpan.FromMilliseconds(150), () =>
         {
-            // 保持最新 80 行日志
-            var lines = LblLogs.Text.Split('\n');
-            if (lines.Length > 80)
+            lock (_recentLogs)
             {
-                LblLogs.Text = string.Join('\n', lines[^70..]) + "\n" + line;
+                _logUpdateScheduled = false;
+                LblLogs.Text = string.Join('\n', _recentLogs);
             }
-            else
-            {
-                LblLogs.Text += "\n" + line;
-            }
-        }
+        });
     }
 
     private void OnClearLogClicked(object? sender, EventArgs e)
     {
+        lock (_recentLogs)
+        {
+            _recentLogs.Clear();
+        }
         LblLogs.Text = $"[{DateTime.Now:HH:mm:ss}] 日志已清空。";
     }
 }
