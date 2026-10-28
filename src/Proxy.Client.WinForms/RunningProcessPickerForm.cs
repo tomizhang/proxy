@@ -29,9 +29,9 @@ public sealed class RunningProcessPickerForm : Form
         public bool HasWindow => !string.IsNullOrWhiteSpace(WindowTitle);
     }
 
-    public RunningProcessPickerForm()
+    public RunningProcessPickerForm(string title = "选择正在运行的应用程序")
     {
-        Text = "选择正在运行的应用程序 (添加到直连名单)";
+        Text = title;
         Size = new Size(680, 520);
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(550, 400);

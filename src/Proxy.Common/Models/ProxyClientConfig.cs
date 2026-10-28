@@ -64,7 +64,7 @@ public class ProxyClientConfig
     public string BypassRules { get; set; } = "*.baidu.com;*.qq.com;*.taobao.com;*.jd.com;*.alipay.com;*.bilibili.com;*.163.com;*.zhihu.com;*.weibo.com;*.sina.com.cn;*.sohu.com;*.cn;localhost;127.*;10.*;172.16.*;172.17.*;172.18.*;172.19.*;172.20.*;172.21.*;172.22.*;172.23.*;172.24.*;172.25.*;172.26.*;172.27.*;172.28.*;172.29.*;172.30.*;172.31.*;192.168.*;<local>";
 
     public const string DefaultBlacklistProcesses = "rustdesk.exe;wechat.exe;qq.exe;dingtalk.exe;feishu.exe;baidunetdisk.exe;steam.exe";
-    public const string DefaultWhitelistProcesses = "chrome.exe;msedge.exe;firefox.exe;brave.exe;telegram.exe;discord.exe;git.exe;curl.exe";
+    public const string DefaultWhitelistProcesses = "chrome.exe;msedge.exe;firefox.exe;brave.exe;antigravity.exe;language_server.exe;code.exe;cursor.exe;node.exe;git.exe;curl.exe;telegram.exe;discord.exe";
 
     /// <summary>
     /// 是否开启程序名单分流过滤 (可选择“仅直连选中的应用”或“只为选中的应用进行代理”)

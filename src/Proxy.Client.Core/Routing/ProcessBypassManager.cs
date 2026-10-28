@@ -61,7 +61,26 @@ public sealed class ProcessBypassManager
     {
         if (string.IsNullOrWhiteSpace(processName)) return false;
         string name = Path.GetFileName(processName).Trim().ToLowerInvariant();
-        return _bypassedProcesses.Contains(name);
+        if (_bypassedProcesses.Contains(name)) return true;
+
+        // 智能关联：若名单中包含 antigravity，自动覆盖其附属服务 language_server
+        if (name == "language_server" || name == "language_server.exe")
+        {
+            if (_bypassedProcesses.Contains("antigravity") || _bypassedProcesses.Contains("antigravity.exe"))
+            {
+                return true;
+            }
+        }
+
+        // 智能关联：若名单中包含 code 或 cursor，自动覆盖其相关辅助进程
+        if ((name.StartsWith("code") || name.StartsWith("cursor")) &&
+            (_bypassedProcesses.Contains("code") || _bypassedProcesses.Contains("code.exe") ||
+             _bypassedProcesses.Contains("cursor") || _bypassedProcesses.Contains("cursor.exe")))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -198,6 +217,12 @@ public sealed class ProcessBypassManager
         }
 
         int pid = GetPidByLocalPort(localPort);
+        if (pid <= 0)
+        {
+            // Windows 内核 TCP 表偶尔存在毫秒级微小延迟，快速微等待后重试一次
+            Thread.Sleep(5);
+            pid = GetPidByLocalPort(localPort);
+        }
         if (pid <= 0) return null;
 
         string? name = GetProcessNameByPid(pid);

@@ -802,7 +802,8 @@ public partial class MainForm : Form
 
     private void OnAddRunningProcessClicked(object? sender, EventArgs e)
     {
-        using var picker = new RunningProcessPickerForm();
+        string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单 (走代理)" : "黑名单 (直连)";
+        using var picker = new RunningProcessPickerForm($"选择正在运行的应用程序 (添加到{modeDesc})");
         if (picker.ShowDialog(this) == DialogResult.OK)
         {
             int addedCount = 0;
@@ -816,7 +817,8 @@ public partial class MainForm : Form
             if (addedCount > 0)
             {
                 ApplyProcessBypassImmediately();
-                AppendLog($"✅ 已添加 {addedCount} 个正在运行的程序，已即时生效！");
+                string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+                AppendLog($"✅ 已添加 {addedCount} 个正在运行的程序到【{listType}】，已即时生效！");
             }
         }
     }

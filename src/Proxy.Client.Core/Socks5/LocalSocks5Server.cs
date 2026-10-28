@@ -243,8 +243,28 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             int clientPort = (tcpClient.Client.RemoteEndPoint as IPEndPoint)?.Port ?? 0;
 
             // ==================== 3. 直连分流判断 ====================
+
+            // 3.0 本地回环地址永远直连 (杜绝将 127.0.0.1 / localhost / ::1 错误发往远端隧道导致本地服务超时或 OAuth 回调失败)
+            bool isLoopback = targetHost.Equals("127.0.0.1") ||
+                              targetHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                              targetHost.Equals("::1") ||
+                              (IPAddress.TryParse(targetHost, out var tip) && IPAddress.IsLoopback(tip));
+            if (isLoopback)
+            {
+                await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
+                return;
+            }
+
+            // 3.1 域名与 IP 直连绕过 (跳过国内域名如 baidu.com, *.cn, 局域网 192.168.* 等，直接出网)
+            if (_config.EnableBypass && _bypassManager.ShouldBypass(targetHost))
+            {
+                LogMessage?.Invoke($"[直连绕过] {targetHost}:{targetPort} (跳过代理)");
+                await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
+                return;
+            }
+
+            // 3.2 应用程序名单分流判断 (支持“仅直连选中应用”或“只为选中应用代理”)
             string matchedProc = string.Empty;
-            // 3.1 应用程序名单分流判断 (支持“仅直连选中应用”或“只为选中应用代理”)
             if (_config.EnableProcessBypass &&
                 _processBypassManager.ShouldBypass(clientPort, targetHost, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason))
             {
@@ -252,14 +272,6 @@ public sealed class LocalSocks5Server : IAsyncDisposable
                 {
                     LogMessage?.Invoke(bypassReason);
                 }
-                await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
-                return;
-            }
-
-            // 3.2 域名与 IP 直连绕过 (跳过国内域名如 baidu.com)
-            if (_config.EnableBypass && _bypassManager.ShouldBypass(targetHost))
-            {
-                LogMessage?.Invoke($"[直连绕过] {targetHost}:{targetPort} (跳过代理)");
                 await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
                 return;
             }
