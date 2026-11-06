@@ -24,12 +24,21 @@ public sealed class ProcessBypassManager
     }
 
     /// <summary>
+    /// 即时清空所有端口与 PID 识别缓存，确保更新名单或模式后新请求立即重新探测
+    /// </summary>
+    public void ClearCaches()
+    {
+        _portCache.Clear();
+        _pidNameCache.Clear();
+    }
+
+    /// <summary>
     /// 解析分流程序名单 (分号、逗号或换行分隔，支持路径、带.exe或不带.exe)
     /// </summary>
     public void ParseProcessList(string processList)
     {
         _bypassedProcesses.Clear();
-        _portCache.Clear();
+        ClearCaches();
         if (string.IsNullOrWhiteSpace(processList)) return;
 
         var tokens = processList.Split(new[] { ';', ',', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);

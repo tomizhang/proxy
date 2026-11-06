@@ -353,6 +353,17 @@ public partial class MainForm : Form
             Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold),
             ForeColor = Color.FromArgb(40, 167, 69)
         };
+        _chkEnableBypass.CheckedChanged += (s, e) =>
+        {
+            if (_isLoadingConfig) return;
+            _config.EnableBypass = _chkEnableBypass.Checked;
+            ConfigManager.Save(_config);
+            if (_engine != null && _engine.IsRunning)
+            {
+                _engine.UpdateBypassRules(_config.BypassRules, _config.EnableBypass);
+                AppendLog(_config.EnableBypass ? "⚡ [即时生效] 已开启跳过规则分流 (国内域名与内网直连)！" : "⚡ [即时生效] 已停用跳过规则分流。");
+            }
+        };
 
         var lblBypassTitle = new Label { Text = "跳过规则 (分号分隔):", Location = new Point(20, 114), AutoSize = true };
         _txtBypassRules = new TextBox
@@ -363,6 +374,21 @@ public partial class MainForm : Form
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
             Font = new Font("Consolas", 8.5F)
+        };
+        _txtBypassRules.Leave += (s, e) =>
+        {
+            if (_isLoadingConfig) return;
+            string newRules = _txtBypassRules.Text.Trim();
+            if (newRules != _config.BypassRules)
+            {
+                _config.BypassRules = newRules;
+                ConfigManager.Save(_config);
+                if (_engine != null && _engine.IsRunning)
+                {
+                    _engine.UpdateBypassRules(_config.BypassRules, _config.EnableBypass);
+                    AppendLog("⚡ [即时生效] 跳过规则已更新！");
+                }
+            }
         };
 
         _chkEnableTun = new CheckBox
@@ -480,16 +506,58 @@ public partial class MainForm : Form
         _clbProcesses = new CheckedListBox
         {
             Location = new Point(20, 92),
-            Size = new Size(530, 125),
+            Size = new Size(530, 122),
             CheckOnClick = true,
             Font = new Font("Segoe UI", 9.5F)
         };
         _clbProcesses.ItemCheck += (s, e) => SafeBeginInvoke(ApplyProcessBypassImmediately);
+        _clbProcesses.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Delete)
+            {
+                OnRemoveProcessClicked(s, e);
+            }
+        };
+
+        var txtManualProc = new TextBox
+        {
+            Location = new Point(20, 218),
+            Size = new Size(420, 26),
+            PlaceholderText = "输入应用名快速添加 (如 antigravity.exe 或 git)，按回车立即生效...",
+            Font = new Font("Microsoft YaHei UI", 9F)
+        };
+        var btnAddManual = new Button
+        {
+            Text = "➕ 快捷添加",
+            Location = new Point(445, 216),
+            Size = new Size(105, 28),
+            BackColor = Color.FromArgb(240, 243, 246),
+            Cursor = Cursors.Hand
+        };
+        void PerformManualAdd()
+        {
+            string txt = txtManualProc.Text.Trim();
+            if (string.IsNullOrWhiteSpace(txt)) return;
+            AddProcessToClb(txt, isChecked: true);
+            ApplyProcessBypassImmediately();
+            txtManualProc.Clear();
+            string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+            AppendLog($"✅ 已添加应用【{txt}】到【{listType}】，已即时生效！");
+        }
+        btnAddManual.Click += (s, e) => PerformManualAdd();
+        txtManualProc.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.SuppressKeyPress = true;
+                PerformManualAdd();
+            }
+        };
 
         var pnlProcButtons = new Panel
         {
             Location = new Point(565, 92),
-            Size = new Size(180, 125)
+            Size = new Size(180, 152)
         };
 
         var btnAddRunning = new Button
@@ -517,9 +585,9 @@ public partial class MainForm : Form
 
         var btnRemoveProc = new Button
         {
-            Text = "❌ 移除所选",
+            Text = "❌ 移除所选 (Del)",
             Location = new Point(0, 76),
-            Size = new Size(85, 30),
+            Size = new Size(95, 30),
             BackColor = Color.FromArgb(240, 243, 246),
             Cursor = Cursors.Hand
         };
@@ -528,8 +596,8 @@ public partial class MainForm : Form
         _btnResetProc = new Button
         {
             Text = "🔄 恢复推荐",
-            Location = new Point(90, 76),
-            Size = new Size(85, 30),
+            Location = new Point(100, 76),
+            Size = new Size(75, 30),
             BackColor = Color.FromArgb(240, 243, 246),
             Cursor = Cursors.Hand
         };
@@ -560,7 +628,7 @@ public partial class MainForm : Form
         ]);
 
         tabProcess.Controls.AddRange([
-            _chkEnableProcessBypass, pnlSwitch, _lblProcessTip, _clbProcesses, pnlProcButtons
+            _chkEnableProcessBypass, pnlSwitch, _lblProcessTip, _clbProcesses, txtManualProc, btnAddManual, pnlProcButtons
         ]);
 
         tabControl.TabPages.Add(tabNode);
@@ -763,6 +831,7 @@ public partial class MainForm : Form
         if (_engine != null && _engine.IsRunning)
         {
             _engine.UpdateProcessBypass(_config.GetActiveProcessList(), _config.EnableProcessBypass, _config.ProcessFilterMode);
+            _engine.UpdateBypassRules(_config.BypassRules, _config.EnableBypass);
         }
 
         AppendLog("✅ 配置已成功保存！");
@@ -804,22 +873,16 @@ public partial class MainForm : Form
     {
         string modeDesc = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单 (走代理)" : "黑名单 (直连)";
         using var picker = new RunningProcessPickerForm($"选择正在运行的应用程序 (添加到{modeDesc})");
-        if (picker.ShowDialog(this) == DialogResult.OK)
+        if (picker.ShowDialog(this) == DialogResult.OK && picker.SelectedProcessNames.Count > 0)
         {
-            int addedCount = 0;
+            int count = picker.SelectedProcessNames.Count;
             foreach (var name in picker.SelectedProcessNames)
             {
-                if (AddProcessToClb(name, isChecked: true))
-                {
-                    addedCount++;
-                }
+                AddProcessToClb(name, isChecked: true);
             }
-            if (addedCount > 0)
-            {
-                ApplyProcessBypassImmediately();
-                string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
-                AppendLog($"✅ 已添加 {addedCount} 个正在运行的程序到【{listType}】，已即时生效！");
-            }
+            ApplyProcessBypassImmediately();
+            string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+            AppendLog($"✅ 已添加/激活 {count} 个程序到【{listType}】，已即时生效！");
         }
     }
 
@@ -832,23 +895,17 @@ public partial class MainForm : Form
             Title = $"选择需要{modeDesc}的应用程序 (.exe)",
             Multiselect = true
         };
-        if (ofd.ShowDialog(this) == DialogResult.OK)
+        if (ofd.ShowDialog(this) == DialogResult.OK && ofd.FileNames.Length > 0)
         {
-            int addedCount = 0;
+            int count = ofd.FileNames.Length;
             foreach (var file in ofd.FileNames)
             {
                 string exeName = System.IO.Path.GetFileName(file);
-                if (AddProcessToClb(exeName, isChecked: true))
-                {
-                    addedCount++;
-                }
+                AddProcessToClb(exeName, isChecked: true);
             }
-            if (addedCount > 0)
-            {
-                ApplyProcessBypassImmediately();
-                string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
-                AppendLog($"✅ 已浏览添加 {addedCount} 个程序到【{listType}】，已即时生效！");
-            }
+            ApplyProcessBypassImmediately();
+            string listType = _config.ProcessFilterMode == ProcessProxyMode.ProxySelected ? "白名单" : "黑名单";
+            AppendLog($"✅ 已浏览添加/激活 {count} 个程序到【{listType}】，已即时生效！");
         }
     }
 
@@ -857,7 +914,7 @@ public partial class MainForm : Form
         var selectedIndices = _clbProcesses.SelectedIndices.Cast<int>().OrderByDescending(i => i).ToList();
         if (selectedIndices.Count == 0)
         {
-            MessageBox.Show("请先在列表中点击选择要移除的程序行。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show("请先在列表中点击选择要移除的程序行 (或按键盘 Delete 键)。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
@@ -901,13 +958,13 @@ public partial class MainForm : Form
             fileName += ".exe";
         }
 
-        // 避免重复添加
+        // 避免重复添加，若已存在则直接更新选中状态
         for (int i = 0; i < _clbProcesses.Items.Count; i++)
         {
             if (string.Equals(_clbProcesses.Items[i]?.ToString(), fileName, StringComparison.OrdinalIgnoreCase))
             {
                 _clbProcesses.SetItemChecked(i, isChecked);
-                return false;
+                return true;
             }
         }
 

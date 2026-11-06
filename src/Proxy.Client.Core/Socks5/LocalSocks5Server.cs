@@ -27,6 +27,8 @@ public sealed class LocalSocks5Server : IAsyncDisposable
     private readonly ProcessBypassManager _processBypassManager;
     private readonly IPAddress? _physicalIp;
     private readonly CancellationTokenSource _cts = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TcpClient, byte> _activeClients = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Domain, DateTime Expiry)> _ipToDomainCache = new(StringComparer.OrdinalIgnoreCase);
     private TcpListener? _listener;
     private Task? _listenTask;
     private bool _disposed;
@@ -86,6 +88,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
     private async Task HandleClientAsync(TcpClient client)
     {
         using var tcpClient = client;
+        _activeClients.TryAdd(tcpClient, 0);
         using var stream = tcpClient.GetStream();
         byte[] buffer = ArrayPool<byte>.Shared.Rent(4096);
 
@@ -163,6 +166,19 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
                 // 回复成功建立
                 await stream.WriteAsync(new byte[] { 0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0 }, _cts.Token);
+
+                // 若 targetHost 为 IP 地址，尝试利用 DNS 缓存或首包探测还原真实域名 (突破 TUN 模式域名丢失盲区)
+                if (IPAddress.TryParse(targetHost, out _))
+                {
+                    if (stream.DataAvailable)
+                    {
+                        int peek = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, 2048)), _cts.Token);
+                        if (peek > 0)
+                        {
+                            initialData = buffer.AsMemory(0, peek).ToArray();
+                        }
+                    }
+                }
             }
             else
             {
@@ -205,6 +221,16 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
                     byte[] response = Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection Established\r\nConnection: close\r\n\r\n");
                     await stream.WriteAsync(response, _cts.Token);
+
+                    // CONNECT 建立后尝试预读首包探测 TLS SNI
+                    if (IPAddress.TryParse(targetHost, out _) && stream.DataAvailable)
+                    {
+                        int peek = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, 2048)), _cts.Token);
+                        if (peek > 0)
+                        {
+                            initialData = buffer.AsMemory(0, peek).ToArray();
+                        }
+                    }
                 }
                 else
                 {
@@ -242,23 +268,49 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
             int clientPort = (tcpClient.Client.RemoteEndPoint as IPEndPoint)?.Port ?? 0;
 
-            // ==================== 3. 直连分流判断 ====================
+            // 域名探测与 DNS 映射还原 (解决 TUN 模式下只有 IP 无法命中域名跳过规则的问题)
+            string? sniffed = null;
+            if (!initialData.IsEmpty)
+            {
+                sniffed = DomainSniffer.SniffDomain(initialData.Span);
+            }
+            if (string.IsNullOrEmpty(sniffed) && _ipToDomainCache.TryGetValue(targetHost, out var cached) && cached.Expiry > DateTime.UtcNow)
+            {
+                sniffed = cached.Domain;
+            }
 
-            // 3.0 本地回环地址永远直连 (杜绝将 127.0.0.1 / localhost / ::1 错误发往远端隧道导致本地服务超时或 OAuth 回调失败)
-            bool isLoopback = targetHost.Equals("127.0.0.1") ||
-                              targetHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                              targetHost.Equals("::1") ||
-                              (IPAddress.TryParse(targetHost, out var tip) && IPAddress.IsLoopback(tip));
-            if (isLoopback)
+            string resolvedDomain = !string.IsNullOrEmpty(sniffed) ? sniffed : targetHost;
+
+            // ==================== 3. 直连分流与跳过规则判断 (核心：无论黑白名单均遵循跳过规则) ====================
+
+            // 3.0 本地回环与内网私有 IP 永远直连 (无条件直连，绝不进入远端代理隧道)
+            if (BypassManager.IsPrivateOrLocalAddress(targetHost) || BypassManager.IsPrivateOrLocalAddress(resolvedDomain))
             {
                 await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
                 return;
             }
 
-            // 3.1 域名与 IP 直连绕过 (跳过国内域名如 baidu.com, *.cn, 局域网 192.168.* 等，直接出网)
-            if (_config.EnableBypass && _bypassManager.ShouldBypass(targetHost))
+            // 3.1 跳过规则 (无论白名单还是黑名单，均无条件遵循跳过规则！国内域名、局域网等直接出网)
+            bool shouldBypassRules = false;
+            string bypassMatchedHost = targetHost;
+
+            if (_config.EnableBypass)
             {
-                LogMessage?.Invoke($"[直连绕过] {targetHost}:{targetPort} (跳过代理)");
+                if (_bypassManager.ShouldBypass(targetHost))
+                {
+                    shouldBypassRules = true;
+                    bypassMatchedHost = targetHost;
+                }
+                else if (_bypassManager.ShouldBypass(resolvedDomain))
+                {
+                    shouldBypassRules = true;
+                    bypassMatchedHost = resolvedDomain;
+                }
+            }
+
+            if (shouldBypassRules)
+            {
+                LogMessage?.Invoke($"[跳过规则直连] {bypassMatchedHost}:{targetPort} (遵循跳过规则，直接连接)");
                 await HandleDirectConnectAsync(stream, targetHost, targetPort, initialData);
                 return;
             }
@@ -266,7 +318,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             // 3.2 应用程序名单分流判断 (支持“仅直连选中应用”或“只为选中应用代理”)
             string matchedProc = string.Empty;
             if (_config.EnableProcessBypass &&
-                _processBypassManager.ShouldBypass(clientPort, targetHost, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason))
+                _processBypassManager.ShouldBypass(clientPort, resolvedDomain, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason))
             {
                 if (!string.IsNullOrEmpty(bypassReason))
                 {
@@ -278,11 +330,11 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
             if (_config.EnableProcessBypass && _config.ProcessFilterMode == ProcessProxyMode.ProxySelected && !string.IsNullOrEmpty(matchedProc))
             {
-                LogMessage?.Invoke($"[应用代理] {matchedProc} -> {targetHost}:{targetPort} (命中选中代理名单 -> 隧道)");
+                LogMessage?.Invoke($"[应用白名单代理] {matchedProc} -> {resolvedDomain}:{targetPort} (命中选中代理名单 -> 隧道)");
             }
             else
             {
-                LogMessage?.Invoke($"[隧道代理] {targetHost}:{targetPort} -> Cloudflare Tunnel");
+                LogMessage?.Invoke($"[隧道代理] {resolvedDomain}:{targetPort} -> Cloudflare Tunnel");
             }
 
             // ==================== 4. 远端加密隧道转发 ====================
@@ -347,6 +399,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
         catch { }
         finally
         {
+            _activeClients.TryRemove(tcpClient, out _);
             ArrayPool<byte>.Shared.Return(buffer);
             if (sessionId > 0)
             {
@@ -468,6 +521,10 @@ public sealed class LocalSocks5Server : IAsyncDisposable
                     try
                     {
                         var recv = await upstreamUdp.ReceiveAsync(linkedCts.Token);
+                        if (recv.RemoteEndPoint.Port == 53)
+                        {
+                            TryRecordDnsResponse(recv.Buffer);
+                        }
                         var clientEp = lastClientEp;
                         if (clientEp == null) continue;
 
@@ -572,7 +629,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
     }
 
     /// <summary>
-    /// 即时动态更新程序分流名单、过滤模式与开关状态，无需重启代理服务
+    /// 即时动态更新程序分流名单、过滤模式与开关状态，断开受影响旧长连接确保秒级实时生效
     /// </summary>
     public void UpdateProcessBypass(string bypassProcessList, bool? enabled = null, ProcessProxyMode? mode = null)
     {
@@ -586,6 +643,142 @@ public sealed class LocalSocks5Server : IAsyncDisposable
         }
         _config.SetActiveProcessList(bypassProcessList);
         _processBypassManager.ParseProcessList(bypassProcessList);
+
+        // 重置旧的长连接，使浏览器和各应用程序立即按新策略分流
+        ResetActiveClientConnections();
+    }
+
+    /// <summary>
+    /// 即时动态更新跳过规则与开关状态
+    /// </summary>
+    public void UpdateBypassRules(string bypassRules, bool? enabled = null)
+    {
+        if (enabled.HasValue)
+        {
+            _config.EnableBypass = enabled.Value;
+        }
+        _config.BypassRules = bypassRules;
+        _bypassManager.ParseRules(bypassRules);
+
+        ResetActiveClientConnections();
+    }
+
+    /// <summary>
+    /// 安全重置当前所有客户端 Keep-Alive 长连接，通知其按新策略重新建连
+    /// </summary>
+    private void ResetActiveClientConnections()
+    {
+        try
+        {
+            foreach (var client in _activeClients.Keys)
+            {
+                try
+                {
+                    client.Close();
+                    client.Dispose();
+                }
+                catch { }
+            }
+            _activeClients.Clear();
+        }
+        catch { }
+    }
+
+    private void TryRecordDnsResponse(byte[] dnsPayload)
+    {
+        try
+        {
+            if (dnsPayload.Length < 12) return;
+            ushort flags = BinaryPrimitives.ReadUInt16BigEndian(dnsPayload.AsSpan(2, 2));
+            if ((flags & 0x8000) == 0) return; // 不是 Response
+
+            ushort qdCount = BinaryPrimitives.ReadUInt16BigEndian(dnsPayload.AsSpan(4, 2));
+            ushort anCount = BinaryPrimitives.ReadUInt16BigEndian(dnsPayload.AsSpan(6, 2));
+            if (qdCount == 0 || anCount == 0) return;
+
+            int pos = 12;
+            string domain = ReadDnsName(dnsPayload, ref pos);
+            if (string.IsNullOrEmpty(domain)) return;
+
+            pos += 4; // 跳过 QTYPE(2) 和 QCLASS(2)
+
+            for (int i = 0; i < anCount && pos + 10 <= dnsPayload.Length; i++)
+            {
+                SkipDnsName(dnsPayload, ref pos);
+                if (pos + 10 > dnsPayload.Length) break;
+
+                ushort type = BinaryPrimitives.ReadUInt16BigEndian(dnsPayload.AsSpan(pos, 2));
+                ushort rdlen = BinaryPrimitives.ReadUInt16BigEndian(dnsPayload.AsSpan(pos + 8, 2));
+                pos += 10;
+
+                if (pos + rdlen > dnsPayload.Length) break;
+
+                if (type == 1 && rdlen == 4) // A 记录 IPv4
+                {
+                    var ip = new IPAddress(dnsPayload.AsSpan(pos, 4)).ToString();
+                    _ipToDomainCache[ip] = (domain.ToLowerInvariant(), DateTime.UtcNow.AddMinutes(10));
+                }
+
+                pos += rdlen;
+            }
+        }
+        catch { }
+    }
+
+    private static string ReadDnsName(byte[] data, ref int pos)
+    {
+        var sb = new StringBuilder();
+        int cur = pos;
+        bool jumped = false;
+        int maxJumps = 5;
+
+        while (cur < data.Length && maxJumps > 0)
+        {
+            byte len = data[cur];
+            if (len == 0)
+            {
+                if (!jumped) pos = cur + 1;
+                break;
+            }
+
+            if ((len & 0xC0) == 0xC0) // 指针压缩
+            {
+                if (cur + 1 >= data.Length) break;
+                if (!jumped) pos = cur + 2;
+                jumped = true;
+                cur = ((len & 0x3F) << 8) | data[cur + 1];
+                maxJumps--;
+                continue;
+            }
+
+            cur++;
+            if (cur + len > data.Length) break;
+            if (sb.Length > 0) sb.Append('.');
+            sb.Append(Encoding.ASCII.GetString(data, cur, len));
+            cur += len;
+            if (!jumped) pos = cur;
+        }
+
+        return sb.ToString();
+    }
+
+    private static void SkipDnsName(byte[] data, ref int pos)
+    {
+        while (pos < data.Length)
+        {
+            byte len = data[pos];
+            if (len == 0)
+            {
+                pos++;
+                break;
+            }
+            if ((len & 0xC0) == 0xC0)
+            {
+                pos += 2;
+                break;
+            }
+            pos += 1 + len;
+        }
     }
 
     public async ValueTask DisposeAsync()

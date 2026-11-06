@@ -109,6 +109,19 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         UpdateProcessBypass(bypassProcessList, null, mode);
     }
 
+    /// <summary>
+    /// 即时动态更新跳过规则与开关状态，正在运行的代理会立即无缝采用新配置
+    /// </summary>
+    public void UpdateBypassRules(string bypassRules, bool? enabled = null)
+    {
+        _config.BypassRules = bypassRules;
+        if (enabled.HasValue)
+        {
+            _config.EnableBypass = enabled.Value;
+        }
+        _socks5Server?.UpdateBypassRules(bypassRules, enabled);
+    }
+
     public async Task StopAsync()
     {
         if (!_isRunning) return;
