@@ -195,6 +195,63 @@ public sealed class TunManager : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// 系统休眠唤醒后，重新同步刷新物理网关、防回环明细路由与 tun2socks 进程状态
+    /// </summary>
+    public void RefreshRoutesOnWakeup(string serverHost)
+    {
+        if (!_isStarted) return;
+
+        LogMessage?.Invoke("正在重新同步 TUN 虚拟网卡防回环明细路由与物理网关...");
+
+        try
+        {
+            // 1. 获取唤醒后的最新物理默认网关与接口索引
+            var gwInfo = RouteManager.GetDefaultGateway();
+            if (gwInfo != null)
+            {
+                _defaultGateway = gwInfo.Value.Gateway;
+                _gatewayIfIndex = gwInfo.Value.InterfaceIndex;
+            }
+
+            // 2. 重新解析远端服务器 IP 并更新直连防回环路由
+            var newServerIp = RouteManager.ResolveServerIp(serverHost);
+            if (newServerIp != null)
+            {
+                if (_serverIp != null && !_serverIp.Equals(newServerIp))
+                {
+                    try { RouteManager.DeleteBypassRoute(_serverIp); } catch { }
+                }
+                _serverIp = newServerIp;
+
+                if (_defaultGateway != null && _gatewayIfIndex > 0)
+                {
+                    RouteManager.AddBypassRoute(_serverIp, _defaultGateway, _gatewayIfIndex);
+                    RouteManager.AddBypassRoute(IPAddress.Parse("1.1.1.1"), _defaultGateway, _gatewayIfIndex);
+                    RouteManager.AddBypassRoute(IPAddress.Parse("8.8.8.8"), _defaultGateway, _gatewayIfIndex);
+                }
+            }
+
+            // 3. 确保全局覆盖路由生效
+            if (_tunIfIndex > 0)
+            {
+                RouteManager.EnableTunGlobalRoutes(IPAddress.Parse("10.0.0.1"), _tunIfIndex);
+            }
+
+            // 4. 检查 tun2socks 是否存活，若退出则重新拉起
+            if (_tun2socksProcess == null || _tun2socksProcess.HasExited)
+            {
+                LogMessage?.Invoke("检测到 tun2socks 核心已退出，正在重新初始化拉起...");
+                _isStarted = false;
+                Start(serverHost);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"TUN 路由休眠唤醒自愈失败: {ex.Message}");
+        }
+    }
+
     public void Stop()
     {
         if (!_isStarted && _tun2socksProcess == null) return;

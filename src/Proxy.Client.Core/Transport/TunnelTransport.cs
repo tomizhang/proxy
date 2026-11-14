@@ -269,13 +269,25 @@ public sealed class TunnelTransport : IAsyncDisposable
 
     private async Task HeartbeatLoopAsync()
     {
-        // 15 秒在所有活跃通道发送心跳 Ping，对抗 Cloudflare 100秒无活动断开及运营商 NAT 超时
+        // 15 秒心跳看门狗：在所有活跃通道发送心跳 Ping，并检测由于休眠或断网产生的假死通道 (Watchdog)
         while (!_cts.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(15), _cts.Token);
 
+                var now = DateTime.UtcNow;
+
+                // 1. 假死通道巡检：若通道虽然显示 Open，但距离上次收到任何数据已超过 30 秒，说明底层 Socket 已被休眠或断网挂起，强制打断以立即重连！
+                foreach (var channel in _channels)
+                {
+                    if (channel.IsConnected && (now - channel.LastActiveUtc).TotalSeconds > 30)
+                    {
+                        channel.ForceReconnect();
+                    }
+                }
+
+                // 2. 发送心跳 Ping
                 if (ActiveChannelCount > 0)
                 {
                     _lastPingTimestamp = Stopwatch.GetTimestamp();
@@ -298,6 +310,47 @@ public sealed class TunnelTransport : IAsyncDisposable
             }
             catch (OperationCanceledException) { break; }
             catch { }
+        }
+    }
+
+    /// <summary>
+    /// 强制中断重置所有通道并重新建连 (用于操作系统从休眠唤醒、网络切换等场景)
+    /// </summary>
+    public async Task ForceReconnectAllChannelsAsync(string reason)
+    {
+        if (_disposed) return;
+
+        // 1. 强制中止所有物理通道底层连接，使挂起的 Receive 循环立刻抛出异常进入重连
+        foreach (var ch in _channels)
+        {
+            ch.ForceReconnect();
+        }
+
+        _sessionChannelMap.Clear();
+
+        // 2. 轮询等待至少一条通道重新就绪 (最多等待 3500ms)
+        var sw = Stopwatch.StartNew();
+        while (ActiveChannelCount == 0 && sw.ElapsedMilliseconds < 3500 && !_cts.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(100, _cts.Token);
+            }
+            catch (OperationCanceledException) { break; }
+        }
+
+        OnChannelStateChanged();
+    }
+
+    /// <summary>
+    /// 确保通道处于健康可用状态，若全部断开则主动触发自愈重连
+    /// </summary>
+    public async Task EnsureHealthyAsync()
+    {
+        if (_disposed) return;
+        if (ActiveChannelCount == 0)
+        {
+            await ForceReconnectAllChannelsAsync("自愈检测：无活跃通道");
         }
     }
 
@@ -339,6 +392,19 @@ public sealed class TunnelTransport : IAsyncDisposable
         private bool _disposed;
 
         public bool IsConnected => _webSocket?.State == WebSocketState.Open;
+        public DateTime LastActiveUtc { get; private set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// 强制中断通道底层套接字，打断可能的挂起阻塞，触发立即重连
+        /// </summary>
+        public void ForceReconnect()
+        {
+            try
+            {
+                _webSocket?.Abort();
+            }
+            catch { }
+        }
 
         public TunnelChannel(
             int channelIndex,
@@ -409,6 +475,7 @@ public sealed class TunnelTransport : IAsyncDisposable
 
                     if (_webSocket.State == WebSocketState.Open)
                     {
+                        LastActiveUtc = DateTime.UtcNow;
                         _parent.OnChannelConnected(_channelIndex);
                         return;
                     }
@@ -472,6 +539,7 @@ public sealed class TunnelTransport : IAsyncDisposable
 
                         if (result.MessageType == WebSocketMessageType.Binary && messageStream.Length > 0)
                         {
+                            LastActiveUtc = DateTime.UtcNow;
                             byte[] encryptedData = messageStream.ToArray();
                             _parent.OnTraffic(0, encryptedData.Length);
 
@@ -538,6 +606,7 @@ public sealed class TunnelTransport : IAsyncDisposable
                         endOfMessage: true,
                         _parentToken);
 
+                    LastActiveUtc = DateTime.UtcNow;
                     _parent.OnTraffic(encryptedData.Length, 0);
                 }
             }

@@ -122,6 +122,65 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         _socks5Server?.UpdateBypassRules(bypassRules, enabled);
     }
 
+    /// <summary>
+    /// 处理操作系统休眠唤醒后的全链路自愈 (自动重连通道、刷新 TUN 路由、确保系统代理生效)
+    /// </summary>
+    public async Task HandleSystemResumeAsync()
+    {
+        if (!_isRunning) return;
+
+        LogMessage?.Invoke("⚡ [休眠自愈] 检测到系统唤醒，正在重新同步网络环境与传输通道...");
+
+        try
+        {
+            // 1. 若开启系统代理，重新确保 Windows 注册表系统代理生效
+            if (_config.EnableSystemProxy && OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    SystemProxyManager.SetSystemProxy($"127.0.0.1:{_config.LocalSocks5Port}", _config.BypassRules);
+                }
+                catch { }
+            }
+
+            // 2. 若开启 TUN 模式，刷新路由与防回环配置
+            if (_config.EnableTun && _tunManager != null && OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    _tunManager.RefreshRoutesOnWakeup(_config.ServerHost);
+                }
+                catch (Exception ex)
+                {
+                    LogMessage?.Invoke($"TUN 路由自愈异常: {ex.Message}");
+                }
+            }
+
+            // 3. 强制重置传输层的所有连接通道，打破死等并立即发起全新建连
+            if (_transport != null)
+            {
+                await _transport.ForceReconnectAllChannelsAsync("系统休眠唤醒");
+            }
+
+            LogMessage?.Invoke("✅ [休眠自愈] 代理通道重置完成，正在恢复正常网络通信。");
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[休眠自愈异常] {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 确保传输通道健康可用，若全部断开则主动触发自愈重连
+    /// </summary>
+    public async Task EnsureHealthyAsync()
+    {
+        if (_transport != null)
+        {
+            await _transport.EnsureHealthyAsync();
+        }
+    }
+
     public async Task StopAsync()
     {
         if (!_isRunning) return;

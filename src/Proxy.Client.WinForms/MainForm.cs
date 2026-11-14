@@ -1,11 +1,15 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Net;
+using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Microsoft.Win32;
 using Proxy.Client.Core;
 using Proxy.Client.Core.Transport;
 using Proxy.Client.Core.Tun;
@@ -101,6 +105,10 @@ public partial class MainForm : Form
             _trayIcon.ContextMenuStrip = trayMenu;
 
             LoadConfigToUi();
+
+            // 监听 Windows 操作系统休眠/睡眠与唤醒事件，实现无感自愈恢复
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
         }
         finally
         {
@@ -1144,26 +1152,79 @@ public partial class MainForm : Form
     private async Task OnTestConnectionClickedAsync()
     {
         SaveUiToConfig();
-        AppendLog($"正在测试连接到 {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path})...");
         _btnTestConnection.Enabled = false;
 
-        var sw = Stopwatch.StartNew();
         try
         {
-            using var ws = new ClientWebSocket();
-
-            string scheme = _config.UseTls ? "wss" : "ws";
-            string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
-            
-            string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _config.ServerHost.Trim();
-            var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
-
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-
-            if (!string.IsNullOrWhiteSpace(_config.SniHost) && !string.Equals(_config.SniHost.Trim(), _config.ServerHost.Trim(), StringComparison.OrdinalIgnoreCase))
+            if (_engine != null && _engine.IsRunning)
             {
+                // ==================== 模式 A：代理运行中，测试真实端到端出海通畅度 ====================
+                AppendLog($"⚡ [测试连接] 代理运行中，正在通过本地代理 (127.0.0.1:{_config.LocalSocks5Port}) 测试出海网络...");
+
+                // 确保通道就绪 (若刚从休眠唤醒可能正在恢复，主动激活健康校验)
+                await _engine.EnsureHealthyAsync();
+
+                var sw = Stopwatch.StartNew();
+                string resp = "";
+                long ms = 0;
+                bool retryNeeded = false;
+
+                try
+                {
+                    resp = await PerformProxyPingAsync(TimeSpan.FromSeconds(6));
+                    sw.Stop();
+                    ms = sw.ElapsedMilliseconds;
+                }
+                catch
+                {
+                    retryNeeded = true;
+                }
+
+                // 若首次测试超时/失败 (例如电脑休眠唤醒后首个连接被远端已断开连接所阻碍)，自动触发自愈并重试一次
+                if (retryNeeded || string.IsNullOrEmpty(resp))
+                {
+                    AppendLog("🔄 首次探测未响应，正在触发代理隧道全链路自愈重连并二次探测...");
+                    await _engine.HandleSystemResumeAsync();
+                    await Task.Delay(500);
+
+                    sw.Restart();
+                    resp = await PerformProxyPingAsync(TimeSpan.FromSeconds(7));
+                    sw.Stop();
+                    ms = sw.ElapsedMilliseconds;
+                }
+
+                _lblLatency.Text = $"延迟: {ms} ms";
+
+                string exitIp = "未知";
+                string colo = "未知";
+                foreach (var line in resp.Split('\n'))
+                {
+                    if (line.StartsWith("ip=")) exitIp = line.Substring(3).Trim();
+                    else if (line.StartsWith("colo=")) colo = line.Substring(5).Trim();
+                }
+
+                AppendLog($"🎉 [测试连接成功] 端到端出海延迟: {ms} ms, Cloudflare 边缘机房: {colo}, 出口 IP: {exitIp}");
+                MessageBox.Show($"🎉 代理通道全面通畅！\n\n• 端到端延迟: {ms} ms\n• Cloudflare 机房: {colo}\n• 当前出口 IP: {exitIp}\n• 本地代理: 127.0.0.1:{_config.LocalSocks5Port}\n\n您的网络流量已成功通过加密隧道出海！", "测试连接成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                // ==================== 模式 B：代理未启动，测试远端 WebSocket 节点握手与延迟 ====================
+                AppendLog($"正在测试连接到 {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path})...");
+
+                var sw = Stopwatch.StartNew();
+                string scheme = _config.UseTls ? "wss" : "ws";
+                string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
+                string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _config.ServerHost.Trim();
+                var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
+
+                using var ws = new ClientWebSocket();
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+
+                // 明确设置不走系统代理 (避免历史残留系统代理拦截)
                 var handler = new SocketsHttpHandler
                 {
+                    Proxy = null,
+                    UseProxy = false,
                     ConnectCallback = async (context, ct) =>
                     {
                         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -1171,24 +1232,20 @@ public partial class MainForm : Form
                         return new NetworkStream(socket, ownsSocket: true);
                     }
                 };
+
                 var invoker = new HttpMessageInvoker(handler);
                 await ws.ConnectAsync(uri, invoker, cts.Token);
-            }
-            else
-            {
-                ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
-                await ws.ConnectAsync(uri, cts.Token);
-            }
+                sw.Stop();
 
-            sw.Stop();
-
-            AppendLog($"🎉 测试连接成功！往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost} -> SNI: {targetDomain})");
-            MessageBox.Show($"连接成功！\n节点: {_config.ServerHost}:{_config.ServerPort}\nSNI: {targetDomain}\n握手延迟: {sw.ElapsedMilliseconds} ms", "测试连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Test Done", CancellationToken.None);
+                _lblLatency.Text = $"延迟: {sw.ElapsedMilliseconds} ms";
+                AppendLog($"🎉 测试连接成功！往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost} -> SNI: {targetDomain})");
+                MessageBox.Show($"连接成功！\n节点: {_config.ServerHost}:{_config.ServerPort}\nSNI: {targetDomain}\n握手延迟: {sw.ElapsedMilliseconds} ms", "测试连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Test Done", CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
-            sw.Stop();
+            _lblLatency.Text = "延迟: 超时";
             AppendLog($"❌ 测试连接失败: {ex.Message}");
 
             string hint = "";
@@ -1215,12 +1272,61 @@ public partial class MainForm : Form
             {
                 hint = "\r\n\r\n💡【错误诊断 (返回 400 BadRequest)】：请求未被识别为合法 WebSocket，中间代理可能篡改了 Upgrade 请求头。";
             }
+            else if (ex.Message.Contains("由于目标计算机积极拒绝") || ex.Message.Contains("No connection could be made"))
+            {
+                hint = "\r\n\r\n💡【错误诊断】：目标端口未开启或本地代理服务未就绪，若电脑刚从休眠中唤醒请等待 2 秒网络重连后重试。";
+            }
 
             MessageBox.Show($"测试连接失败！\r\n错误信息: {ex.Message}{hint}", "测试结果诊断", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {
             _btnTestConnection.Enabled = true;
+        }
+    }
+
+    private async Task<string> PerformProxyPingAsync(TimeSpan timeout)
+    {
+        var proxy = new WebProxy($"http://127.0.0.1:{_config.LocalSocks5Port}");
+        var handler = new HttpClientHandler
+        {
+            Proxy = proxy,
+            UseProxy = true
+        };
+        using var http = new HttpClient(handler) { Timeout = timeout };
+        return await http.GetStringAsync("https://1.1.1.1/cdn-cgi/trace");
+    }
+
+    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
+    {
+        if (e.Mode == PowerModes.Resume)
+        {
+            AppendLog("⚠️ 检测到操作系统从休眠/睡眠中唤醒，等待网络适配器重新上线...");
+            // 延迟 1.5 秒等待物理网络（Wi-Fi / 以太网 DHCP）重新获得 IP 地址
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1500);
+                if (_engine != null && _engine.IsRunning)
+                {
+                    await _engine.HandleSystemResumeAsync();
+                }
+            });
+        }
+    }
+
+    private void OnNetworkAddressChanged(object? sender, EventArgs e)
+    {
+        if (_engine != null && _engine.IsRunning)
+        {
+            // 网络 IP 切换（例如 Wi-Fi 切换或网线插拔），延时微等待后自动触发自愈
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000);
+                if (_engine != null && _engine.IsRunning && _engine.ActiveChannelCount == 0)
+                {
+                    await _engine.HandleSystemResumeAsync();
+                }
+            });
         }
     }
 
@@ -1316,6 +1422,9 @@ public partial class MainForm : Form
         _speedTimer.Dispose();
         _logFlushTimer.Stop();
         _logFlushTimer.Dispose();
+
+        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
 
         if (_engine != null)
         {
