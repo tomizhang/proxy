@@ -1,8 +1,12 @@
 using System;
+using System.Diagnostics;
+using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
+using Proxy.Client.Core.Outbound;
 using Proxy.Client.Core.Socks5;
-using Proxy.Client.Core.Transport;
 using Proxy.Client.Core.Sys;
+using Proxy.Client.Core.Transport;
 using Proxy.Client.Core.Tun;
 using Proxy.Common.Models;
 
@@ -12,8 +16,10 @@ public sealed class ProxyClientEngine : IAsyncDisposable
 {
     private readonly ProxyClientConfig _config;
     private TunnelTransport? _transport;
+    private SingBoxProcessManager? _singBox;
     private LocalSocks5Server? _socks5Server;
     private TunManager? _tunManager;
+    private CancellationTokenSource? _ssPingCts;
     private bool _isRunning;
 
     public event Action<TransportState, string?>? StatusChanged;
@@ -22,10 +28,21 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     public event Action<string>? LogMessage;
 
     public bool IsRunning => _isRunning;
-    public int ActiveChannelCount => _transport?.ActiveChannelCount ?? 0;
-    public int TotalChannelCount => _transport?.TotalChannelCount ?? 0;
-    public long TotalUploadBytes => _transport?.TotalUploadBytes ?? 0;
-    public long TotalDownloadBytes => _transport?.TotalDownloadBytes ?? 0;
+    public int ActiveChannelCount => _config.ProtocolType == ProxyProtocolType.Shadowsocks
+        ? (_isRunning ? 1 : 0)
+        : (_transport?.ActiveChannelCount ?? 0);
+
+    public int TotalChannelCount => _config.ProtocolType == ProxyProtocolType.Shadowsocks
+        ? 1
+        : (_transport?.TotalChannelCount ?? 0);
+
+    public long TotalUploadBytes => _config.ProtocolType == ProxyProtocolType.Shadowsocks
+        ? (_socks5Server?.TotalUploadBytes ?? 0)
+        : (_transport?.TotalUploadBytes ?? 0);
+
+    public long TotalDownloadBytes => _config.ProtocolType == ProxyProtocolType.Shadowsocks
+        ? (_socks5Server?.TotalDownloadBytes ?? 0)
+        : (_transport?.TotalDownloadBytes ?? 0);
 
     public ProxyClientEngine(ProxyClientConfig config)
     {
@@ -36,22 +53,44 @@ public sealed class ProxyClientEngine : IAsyncDisposable
     {
         if (_isRunning) return;
 
-        LogMessage?.Invoke($"正在连接代理服务器: {_config.ServerHost}:{_config.ServerPort} (并发连接池: {_config.ConcurrencyChannels} 条通道, 路径: {_config.Path}, 加密: {_config.Algorithm})...");
+        // 1. 初始化出站通道 (支持自研 Cloudflare WSS 隧道与标准 Shadowsocks 协议)
+        if (_config.ProtocolType == ProxyProtocolType.Shadowsocks)
+        {
+            string nodeDesc = !string.IsNullOrEmpty(_config.NodeName) ? $"【{_config.NodeName}】" : "";
+            LogMessage?.Invoke($"正在连接 Shadowsocks 节点{nodeDesc}: {_config.ServerHost}:{_config.ServerPort} (协议: SS-2022 / 算法: {_config.Algorithm})...");
 
-        // 1. 初始化传输层
-        _transport = new TunnelTransport(_config);
-        _transport.StatusChanged += (state, err) => StatusChanged?.Invoke(state, err);
-        _transport.LatencyUpdated += ms => LatencyUpdated?.Invoke(ms);
-        _transport.TrafficUpdated += (up, down) => TrafficUpdated?.Invoke(up, down);
+            _singBox = new SingBoxProcessManager();
+            _singBox.LogMessage += msg => LogMessage?.Invoke(msg);
+            _singBox.Start(_config);
 
-        await _transport.StartAsync();
+            _socks5Server = new LocalSocks5Server(_config, null, _singBox.InternalPort);
+            _socks5Server.LogMessage += msg => LogMessage?.Invoke(msg);
+            _socks5Server.TrafficUpdated += (up, down) => TrafficUpdated?.Invoke(up, down);
+            _socks5Server.Start();
 
-        // 2. 启动本地代理 (含 SOCKS5、HTTP 代理及直连分流)
-        _socks5Server = new LocalSocks5Server(_config, _transport);
-        _socks5Server.LogMessage += msg => LogMessage?.Invoke(msg);
-        _socks5Server.Start();
+            StatusChanged?.Invoke(TransportState.Connected, null);
 
-        // 3. 自动设置 Windows 系统代理
+            // 启动定时延迟测速
+            _ssPingCts = new CancellationTokenSource();
+            _ = Task.Run(() => ShadowsocksPingLoopAsync(_ssPingCts.Token));
+        }
+        else
+        {
+            LogMessage?.Invoke($"正在连接代理服务器: {_config.ServerHost}:{_config.ServerPort} (并发连接池: {_config.ConcurrencyChannels} 条通道, 路径: {_config.Path}, 加密: {_config.Algorithm})...");
+
+            _transport = new TunnelTransport(_config);
+            _transport.StatusChanged += (state, err) => StatusChanged?.Invoke(state, err);
+            _transport.LatencyUpdated += ms => LatencyUpdated?.Invoke(ms);
+            _transport.TrafficUpdated += (up, down) => TrafficUpdated?.Invoke(up, down);
+
+            await _transport.StartAsync();
+
+            _socks5Server = new LocalSocks5Server(_config, _transport);
+            _socks5Server.LogMessage += msg => LogMessage?.Invoke(msg);
+            _socks5Server.Start();
+        }
+
+        // 2. 自动设置 Windows 系统代理
         if (_config.EnableSystemProxy && OperatingSystem.IsWindows())
         {
             try
@@ -65,7 +104,7 @@ public sealed class ProxyClientEngine : IAsyncDisposable
             }
         }
 
-        // 4. 按需启动 TUN 模式 (Windows)
+        // 3. 按需启动 TUN 模式 (Windows)
         if (_config.EnableTun && OperatingSystem.IsWindows())
         {
             try
@@ -82,6 +121,90 @@ public sealed class ProxyClientEngine : IAsyncDisposable
 
         _isRunning = true;
         LogMessage?.Invoke("代理客户端引擎运行就绪。");
+    }
+
+    private async Task ShadowsocksPingLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                long latency = await MeasureShadowsocksLatencyAsync(ct);
+                if (latency > 0)
+                {
+                    LatencyUpdated?.Invoke(latency);
+                }
+            }
+            catch { }
+
+            try
+            {
+                await Task.Delay(10000, ct);
+            }
+            catch { break; }
+        }
+    }
+
+    /// <summary>
+    /// 测量 Shadowsocks 节点端到端或 TCP Ping 延迟
+    /// </summary>
+    public async Task<long> MeasureShadowsocksLatencyAsync(CancellationToken ct = default)
+    {
+        if (_singBox == null || !_singBox.IsRunning)
+        {
+            return await MeasureTcpPingAsync(_config.ServerHost, _config.ServerPort, ct);
+        }
+
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            using var tcp = new TcpClient { NoDelay = true };
+            using var lcts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            lcts.CancelAfter(3500);
+
+            await tcp.ConnectAsync("127.0.0.1", _singBox.InternalPort, lcts.Token);
+            using var s = tcp.GetStream();
+
+            // SOCKS5 握手
+            await s.WriteAsync(new byte[] { 0x05, 0x01, 0x00 }, lcts.Token);
+            byte[] auth = new byte[2];
+            await s.ReadExactlyAsync(auth.AsMemory(0, 2), lcts.Token);
+            if (auth[1] != 0) return -1;
+
+            // 建立测试连接到 www.google.com:80
+            byte[] req = new byte[] { 0x05, 0x01, 0x00, 0x03, 14, 119, 119, 119, 46, 103, 111, 111, 103, 108, 101, 46, 99, 111, 109, 0, 80 };
+            await s.WriteAsync(req, lcts.Token);
+            byte[] resp = new byte[10];
+            await s.ReadExactlyAsync(resp.AsMemory(0, 10), lcts.Token);
+            sw.Stop();
+
+            if (resp[1] == 0)
+            {
+                return sw.ElapsedMilliseconds;
+            }
+        }
+        catch { }
+
+        return -1;
+    }
+
+    public static async Task<long> MeasureTcpPingAsync(string host, int port, CancellationToken ct = default)
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            using var tcp = new TcpClient { NoDelay = true };
+            using var lcts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            lcts.CancelAfter(3500);
+
+            await tcp.ConnectAsync(host, port, lcts.Token);
+            sw.Stop();
+            return sw.ElapsedMilliseconds;
+        }
+        catch
+        {
+            return -1;
+        }
     }
 
     /// <summary>
@@ -122,70 +245,17 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         _socks5Server?.UpdateBypassRules(bypassRules, enabled);
     }
 
-    /// <summary>
-    /// 处理操作系统休眠唤醒后的全链路自愈 (自动重连通道、刷新 TUN 路由、确保系统代理生效)
-    /// </summary>
-    public async Task HandleSystemResumeAsync()
-    {
-        if (!_isRunning) return;
-
-        LogMessage?.Invoke("⚡ [休眠自愈] 检测到系统唤醒，正在重新同步网络环境与传输通道...");
-
-        try
-        {
-            // 1. 若开启系统代理，重新确保 Windows 注册表系统代理生效
-            if (_config.EnableSystemProxy && OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    SystemProxyManager.SetSystemProxy($"127.0.0.1:{_config.LocalSocks5Port}", _config.BypassRules);
-                }
-                catch { }
-            }
-
-            // 2. 若开启 TUN 模式，刷新路由与防回环配置
-            if (_config.EnableTun && _tunManager != null && OperatingSystem.IsWindows())
-            {
-                try
-                {
-                    _tunManager.RefreshRoutesOnWakeup(_config.ServerHost);
-                }
-                catch (Exception ex)
-                {
-                    LogMessage?.Invoke($"TUN 路由自愈异常: {ex.Message}");
-                }
-            }
-
-            // 3. 强制重置传输层的所有连接通道，打破死等并立即发起全新建连
-            if (_transport != null)
-            {
-                await _transport.ForceReconnectAllChannelsAsync("系统休眠唤醒");
-            }
-
-            LogMessage?.Invoke("✅ [休眠自愈] 代理通道重置完成，正在恢复正常网络通信。");
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"[休眠自愈异常] {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// 确保传输通道健康可用，若全部断开则主动触发自愈重连
-    /// </summary>
-    public async Task EnsureHealthyAsync()
-    {
-        if (_transport != null)
-        {
-            await _transport.EnsureHealthyAsync();
-        }
-    }
-
     public async Task StopAsync()
     {
         if (!_isRunning) return;
 
         LogMessage?.Invoke("正在停止代理服务...");
+
+        if (_ssPingCts != null)
+        {
+            try { _ssPingCts.Cancel(); _ssPingCts.Dispose(); } catch { }
+            _ssPingCts = null;
+        }
 
         // 清除系统代理
         if (_config.EnableSystemProxy && OperatingSystem.IsWindows())
@@ -209,6 +279,13 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         {
             await _socks5Server.DisposeAsync();
             _socks5Server = null;
+        }
+
+        if (_singBox != null)
+        {
+            _singBox.Stop();
+            _singBox.Dispose();
+            _singBox = null;
         }
 
         if (_transport != null)

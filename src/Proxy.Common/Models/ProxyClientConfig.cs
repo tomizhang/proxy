@@ -3,6 +3,21 @@ namespace Proxy.Common.Models;
 public class ProxyClientConfig
 {
     /// <summary>
+    /// 代理协议类型 (V2RayWss 或 Shadowsocks)
+    /// </summary>
+    public ProxyProtocolType ProtocolType { get; set; } = ProxyProtocolType.V2RayWss;
+
+    /// <summary>
+    /// Shadowsocks 节点原始链接 (如 ss://...)
+    /// </summary>
+    public string? ShadowsocksUrl { get; set; }
+
+    /// <summary>
+    /// 节点名称 / 备注信息
+    /// </summary>
+    public string? NodeName { get; set; }
+
+    /// <summary>
     /// 服务器主机名或 Cloudflare 域名 (如 tunnel.example.com 或 优选 IP)
     /// </summary>
     public string ServerHost { get; set; } = "127.0.0.1";
@@ -133,4 +148,23 @@ public class ProxyClientConfig
     /// Wintun 网关
     /// </summary>
     public string TunGateway { get; set; } = "10.0.0.1";
+
+    /// <summary>
+    /// 尝试从 Shadowsocks 链接 (ss://...) 应用节点配置
+    /// </summary>
+    public bool ApplyShadowsocksUrl(string ssUrl, out string? error)
+    {
+        if (Proxy.Common.Utils.ShadowsocksUrlParser.TryParse(ssUrl, out var node, out error) && node != null)
+        {
+            ProtocolType = ProxyProtocolType.Shadowsocks;
+            ServerHost = node.Host;
+            ServerPort = node.Port;
+            Algorithm = node.Method;
+            Password = node.Password;
+            NodeName = node.Tag ?? $"{node.Host}:{node.Port}";
+            ShadowsocksUrl = node.RawUrl;
+            return true;
+        }
+        return false;
+    }
 }

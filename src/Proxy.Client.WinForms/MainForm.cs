@@ -1,15 +1,11 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Net;
-using System.Net.Http;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Microsoft.Win32;
 using Proxy.Client.Core;
 using Proxy.Client.Core.Transport;
 using Proxy.Client.Core.Tun;
@@ -43,6 +39,11 @@ public partial class MainForm : Form
     private Label _lblSpeedDown = null!;
 
     // 配置控件
+    private ComboBox _cboProtocol = null!;
+    private Label _lblHostTitle = null!;
+    private Label _lblCdnTip = null!;
+    private Label _lblNodeTag = null!;
+    private TabPage _tabNode = null!;
     private TextBox _txtHost = null!;
     private NumericUpDown _numPort = null!;
     private TextBox _txtPath = null!;
@@ -105,10 +106,6 @@ public partial class MainForm : Form
             _trayIcon.ContextMenuStrip = trayMenu;
 
             LoadConfigToUi();
-
-            // 监听 Windows 操作系统休眠/睡眠与唤醒事件，实现无感自愈恢复
-            SystemEvents.PowerModeChanged += OnPowerModeChanged;
-            NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
         }
         finally
         {
@@ -226,50 +223,86 @@ public partial class MainForm : Form
         };
 
         // Tab 1: 节点配置
-        var tabNode = new TabPage("  远程节点配置 (Cloudflare WSS)  ");
-        tabNode.BackColor = Color.White;
+        _tabNode = new TabPage("  远程节点配置  ");
+        _tabNode.BackColor = Color.White;
 
-        var lblHost = new Label { Text = "节点地址 (优选IP/优选域名):", Location = new Point(12, 20), AutoSize = true };
-        _txtHost = new TextBox { Location = new Point(195, 17), Width = 235 };
+        var lblProtocol = new Label { Text = "代理协议类型:", Location = new Point(12, 16), AutoSize = true, Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold) };
+        _cboProtocol = new ComboBox { Location = new Point(115, 13), Width = 230, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cboProtocol.Items.AddRange(["Cloudflare WSS 隧道 (自研)", "Shadowsocks (SS/SS-2022)"]);
+        _cboProtocol.SelectedIndexChanged += (s, e) =>
+        {
+            if (_isLoadingConfig) return;
+            var targetProto = _cboProtocol.SelectedIndex == 1 ? ProxyProtocolType.Shadowsocks : ProxyProtocolType.V2RayWss;
+            _config.ProtocolType = targetProto;
+            UpdateProtocolUi(targetProto);
+        };
 
-        var lblPort = new Label { Text = "端口:", Location = new Point(445, 20), AutoSize = true };
-        _numPort = new NumericUpDown { Location = new Point(490, 17), Width = 75, Minimum = 1, Maximum = 65535, Value = 5000 };
+        var btnImportSs = new Button
+        {
+            Text = "📋 导入/粘贴节点链接 (支持 ss://)",
+            Location = new Point(360, 11),
+            Size = new Size(240, 30),
+            BackColor = Color.FromArgb(102, 51, 153), // 优雅紫色
+            ForeColor = Color.White,
+            FlatStyle = FlatStyle.Flat,
+            Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
+            Cursor = Cursors.Hand
+        };
+        btnImportSs.FlatAppearance.BorderSize = 0;
+        btnImportSs.Click += (s, e) => OnImportSsClicked();
 
-        _chkUseTls = new CheckBox { Text = "开启 TLS (WSS 443)", Location = new Point(580, 18), AutoSize = true };
+        _lblNodeTag = new Label
+        {
+            Text = "",
+            Location = new Point(610, 16),
+            Size = new Size(130, 22),
+            ForeColor = Color.DarkSlateBlue,
+            Font = new Font("Microsoft YaHei UI", 8.5F, FontStyle.Bold),
+            AutoEllipsis = true
+        };
+
+        _lblHostTitle = new Label { Text = "节点地址 (IP/域名):", Location = new Point(12, 52), AutoSize = true };
+        _txtHost = new TextBox { Location = new Point(135, 49), Width = 295 };
+
+        var lblPort = new Label { Text = "端口:", Location = new Point(445, 52), AutoSize = true };
+        _numPort = new NumericUpDown { Location = new Point(490, 49), Width = 75, Minimum = 1, Maximum = 65535, Value = 5000 };
+
+        _chkUseTls = new CheckBox { Text = "开启 TLS (443)", Location = new Point(580, 50), AutoSize = true };
         _chkUseTls.CheckedChanged += (s, e) =>
         {
             if (_chkUseTls.Checked && _numPort.Value == 5000) _numPort.Value = 443;
         };
 
-        var lblPath = new Label { Text = "WebSocket 路径:", Location = new Point(12, 60), AutoSize = true };
-        _txtPath = new TextBox { Location = new Point(195, 57), Width = 150, Text = "/tunnel" };
+        var lblPath = new Label { Text = "WebSocket 路径:", Location = new Point(12, 86), AutoSize = true };
+        _txtPath = new TextBox { Location = new Point(135, 83), Width = 210, Text = "/tunnel" };
 
-        var lblSni = new Label { Text = "真实域名 (SNI/Host):", Location = new Point(360, 60), AutoSize = true };
-        _txtSni = new TextBox { Location = new Point(490, 57), Width = 240 };
+        var lblSni = new Label { Text = "真实域名 (SNI/Host):", Location = new Point(360, 86), AutoSize = true };
+        _txtSni = new TextBox { Location = new Point(490, 83), Width = 240 };
 
-        var lblPwd = new Label { Text = "认证密码 / Token:", Location = new Point(12, 100), AutoSize = true };
-        _txtPassword = new TextBox { Location = new Point(195, 97), Width = 235, UseSystemPasswordChar = true };
+        var lblPwd = new Label { Text = "认证密码 / 密钥:", Location = new Point(12, 120), AutoSize = true };
+        _txtPassword = new TextBox { Location = new Point(135, 117), Width = 295, UseSystemPasswordChar = true };
 
-        var lblAlgo = new Label { Text = "自定义加密算法:", Location = new Point(445, 100), AutoSize = true };
-        _cboAlgo = new ComboBox { Location = new Point(555, 97), Width = 175, DropDownStyle = ComboBoxStyle.DropDownList };
+        var lblAlgo = new Label { Text = "加密算法:", Location = new Point(445, 120), AutoSize = true };
+        _cboAlgo = new ComboBox { Location = new Point(515, 117), Width = 215, DropDownStyle = ComboBoxStyle.DropDown };
         _cboAlgo.Items.AddRange(CryptoFactory.SupportedAlgorithms);
+        _cboAlgo.Items.AddRange(["2022-blake3-aes-256-gcm", "2022-blake3-aes-128-gcm", "2022-blake3-chacha20-poly1305", "chacha20-ietf-poly1305"]);
 
-        var lblConcurrency = new Label { Text = "并发加速通道数:", Location = new Point(12, 133), AutoSize = true };
-        _numConcurrency = new NumericUpDown { Location = new Point(195, 130), Width = 70, Minimum = 1, Maximum = 16, Value = 4 };
+        var lblConcurrency = new Label { Text = "并发加速通道数:", Location = new Point(12, 152), AutoSize = true };
+        _numConcurrency = new NumericUpDown { Location = new Point(135, 149), Width = 70, Minimum = 1, Maximum = 16, Value = 4 };
         var lblConcurrencyTip = new Label
         {
-            Text = "(多路复用连接池：单 IP 开启多条物理隧道并发传输，消除队头阻塞并突破单连接限速；支持逗号分隔多个优选 IP)",
-            Location = new Point(275, 133),
+            Text = "(多路复用连接池：单 IP 开启多条物理隧道并发传输，突破限速；SS 模式无需多通道)",
+            Location = new Point(215, 152),
             AutoSize = true,
             ForeColor = Color.DarkSlateGray,
             Font = new Font("Microsoft YaHei UI", 8.5F)
         };
 
-        var lblCdnTip = new Label
+        _lblCdnTip = new Label
         {
-            Text = "💡 优选提示：若使用 Cloudflare 优选，【节点地址】填优选 IP 或优选域名，【真实域名】填您自己的域名 (如 sg.numb.dpdns.org)；若不使用优选，两者填相同真实域名即可。",
-            Location = new Point(12, 162),
-            Size = new Size(730, 24),
+            Text = "💡 提示：支持导入 ss:// 节点订阅链接 (SS-2022 及传统协议)，或使用自建 Cloudflare WSS 隧道。",
+            Location = new Point(12, 178),
+            Size = new Size(730, 22),
             ForeColor = Color.DarkSlateGray,
             Font = new Font("Microsoft YaHei UI", 8.5F)
         };
@@ -277,7 +310,7 @@ public partial class MainForm : Form
         // 快捷操作按钮条（Tab 底部）
         var pnlActions = new FlowLayoutPanel
         {
-            Location = new Point(12, 195),
+            Location = new Point(12, 204),
             Size = new Size(720, 48),
             FlowDirection = FlowDirection.LeftToRight
         };
@@ -326,12 +359,13 @@ public partial class MainForm : Form
 
         pnlActions.Controls.AddRange([_btnConnectBottom, _btnTestConnection, btnSaveConfig]);
 
-        tabNode.Controls.AddRange([
-            lblHost, _txtHost, lblPort, _numPort, _chkUseTls,
+        _tabNode.Controls.AddRange([
+            lblProtocol, _cboProtocol, btnImportSs, _lblNodeTag,
+            _lblHostTitle, _txtHost, lblPort, _numPort, _chkUseTls,
             lblPath, _txtPath, lblSni, _txtSni,
             lblPwd, _txtPassword, lblAlgo, _cboAlgo,
             lblConcurrency, _numConcurrency, lblConcurrencyTip,
-            lblCdnTip,
+            _lblCdnTip,
             pnlActions
         ]);
 
@@ -639,7 +673,7 @@ public partial class MainForm : Form
             _chkEnableProcessBypass, pnlSwitch, _lblProcessTip, _clbProcesses, txtManualProc, btnAddManual, pnlProcButtons
         ]);
 
-        tabControl.TabPages.Add(tabNode);
+        tabControl.TabPages.Add(_tabNode);
         tabControl.TabPages.Add(tabMode);
         tabControl.TabPages.Add(tabProcess);
 
@@ -702,14 +736,23 @@ public partial class MainForm : Form
         _isLoadingConfig = true;
         try
         {
+            _cboProtocol.SelectedIndex = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? 1 : 0;
+            _lblNodeTag.Text = !string.IsNullOrEmpty(_config.NodeName) ? $"节点: {_config.NodeName}" : "";
+            UpdateProtocolUi(_config.ProtocolType);
+
             _txtHost.Text = _config.ServerHost;
-            _numPort.Value = _config.ServerPort;
+            _numPort.Value = Math.Clamp(_config.ServerPort, 1, 65535);
             _txtPath.Text = _config.Path;
             _chkUseTls.Checked = _config.UseTls;
             _txtSni.Text = _config.SniHost ?? "";
             _txtPassword.Text = _config.Password;
-            _cboAlgo.SelectedItem = _config.Algorithm;
-            if (_cboAlgo.SelectedIndex < 0 && _cboAlgo.Items.Count > 0) _cboAlgo.SelectedIndex = 0;
+
+            if (!_cboAlgo.Items.Contains(_config.Algorithm))
+            {
+                _cboAlgo.Items.Add(_config.Algorithm);
+            }
+            _cboAlgo.Text = _config.Algorithm;
+
             _numConcurrency.Value = Math.Clamp(_config.ConcurrencyChannels, 1, 16);
             _numSocks5Port.Value = _config.LocalSocks5Port;
             _chkEnableSystemProxy.Checked = _config.EnableSystemProxy;
@@ -724,6 +767,127 @@ public partial class MainForm : Form
         finally
         {
             _isLoadingConfig = false;
+        }
+    }
+
+    private void UpdateProtocolUi(ProxyProtocolType proto)
+    {
+        if (proto == ProxyProtocolType.Shadowsocks)
+        {
+            _tabNode.Text = "  远程节点配置 (Shadowsocks / SS-2022)  ";
+            _lblHostTitle.Text = "服务器地址 (IP):";
+            _txtPath.Enabled = false;
+            _txtPath.BackColor = Color.FromArgb(245, 245, 245);
+            _chkUseTls.Enabled = false;
+            _numConcurrency.Enabled = false;
+            _lblCdnTip.Text = "💡 当前为【Shadowsocks 协议】节点，使用 sing-box 工业级核心直连；支持一键导入 ss:// 订阅链接。";
+        }
+        else
+        {
+            _tabNode.Text = "  远程节点配置 (Cloudflare WSS)  ";
+            _lblHostTitle.Text = "节点地址 (优选IP):";
+            _txtPath.Enabled = true;
+            _txtPath.BackColor = Color.White;
+            _chkUseTls.Enabled = true;
+            _numConcurrency.Enabled = true;
+            _lblCdnTip.Text = "💡 优选提示：若使用 Cloudflare 优选，【节点地址】填优选 IP 或优选域名，【真实域名】填您自己的域名；若不使用优选，两者填相同真实域名即可。";
+        }
+    }
+
+    private void OnImportSsClicked()
+    {
+        string? textToParse = null;
+
+        // 优先检查剪贴板中是否包含 ss:// 链接
+        if (Clipboard.ContainsText())
+        {
+            string clip = Clipboard.GetText().Trim();
+            if (clip.Contains("ss://", StringComparison.OrdinalIgnoreCase))
+            {
+                int start = clip.IndexOf("ss://", StringComparison.OrdinalIgnoreCase);
+                int end = clip.IndexOfAny(new[] { ' ', '\r', '\n', '\t' }, start);
+                textToParse = end > start ? clip.Substring(start, end - start) : clip.Substring(start);
+            }
+        }
+
+        // 若剪贴板无 ss:// 链接，弹出友好输入框供用户粘贴
+        if (string.IsNullOrEmpty(textToParse))
+        {
+            using var promptForm = new Form
+            {
+                Text = "导入 Shadowsocks 订阅/节点链接 (ss://)",
+                Size = new Size(620, 240),
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                BackColor = Color.White
+            };
+
+            var lblPrompt = new Label
+            {
+                Text = "请在下方粘贴 Shadowsocks 订阅链接 (支持 SS-2022 及各种标准 ss:// 链接):",
+                Location = new Point(20, 15),
+                AutoSize = true,
+                Font = new Font("Microsoft YaHei UI", 9.5F)
+            };
+
+            var txtInput = new TextBox
+            {
+                Location = new Point(20, 45),
+                Size = new Size(560, 75),
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Consolas", 9F)
+            };
+
+            var btnOk = new Button
+            {
+                Text = "✔ 立即解析并应用",
+                DialogResult = DialogResult.OK,
+                Location = new Point(310, 138),
+                Size = new Size(150, 36),
+                BackColor = Color.FromArgb(0, 120, 215),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnOk.FlatAppearance.BorderSize = 0;
+
+            var btnCancel = new Button
+            {
+                Text = "取消",
+                DialogResult = DialogResult.Cancel,
+                Location = new Point(470, 138),
+                Size = new Size(110, 36),
+                BackColor = Color.FromArgb(240, 243, 246),
+                Cursor = Cursors.Hand
+            };
+
+            promptForm.Controls.AddRange([lblPrompt, txtInput, btnOk, btnCancel]);
+            promptForm.AcceptButton = btnOk;
+            promptForm.CancelButton = btnCancel;
+
+            if (promptForm.ShowDialog(this) == DialogResult.OK)
+            {
+                textToParse = txtInput.Text.Trim();
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(textToParse)) return;
+
+        if (_config.ApplyShadowsocksUrl(textToParse, out string? err))
+        {
+            LoadConfigToUi();
+            ConfigManager.Save(_config);
+
+            string nodeName = !string.IsNullOrEmpty(_config.NodeName) ? _config.NodeName : $"{_config.ServerHost}:{_config.ServerPort}";
+            AppendLog($"✅ 成功导入 Shadowsocks 节点【{nodeName}】！协议: SS-2022 / 算法: {_config.Algorithm}");
+            MessageBox.Show($"已成功导入 Shadowsocks 节点：\n\n节点名称: {nodeName}\n服务器地址: {_config.ServerHost}:{_config.ServerPort}\n加密算法: {_config.Algorithm}\n\n已自动切换为 Shadowsocks 模式，点击【点击连接】即可畅快使用！", "导入成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        else
+        {
+            MessageBox.Show($"解析 Shadowsocks 链接失败: {err}\n\n请确认链接以 ss:// 开头且 Base64 格式正确。", "解析失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -817,13 +981,14 @@ public partial class MainForm : Form
 
     private void SaveUiToConfig()
     {
+        _config.ProtocolType = _cboProtocol.SelectedIndex == 1 ? ProxyProtocolType.Shadowsocks : ProxyProtocolType.V2RayWss;
         _config.ServerHost = _txtHost.Text.Trim();
         _config.ServerPort = (int)_numPort.Value;
         _config.Path = _txtPath.Text.Trim();
         _config.UseTls = _chkUseTls.Checked;
         _config.SniHost = string.IsNullOrWhiteSpace(_txtSni.Text) ? null : _txtSni.Text.Trim();
         _config.Password = _txtPassword.Text;
-        _config.Algorithm = _cboAlgo.SelectedItem?.ToString() ?? "aes-256-gcm";
+        _config.Algorithm = !string.IsNullOrWhiteSpace(_cboAlgo.Text) ? _cboAlgo.Text.Trim() : (_cboAlgo.SelectedItem?.ToString() ?? "aes-256-gcm");
         _config.ConcurrencyChannels = (int)_numConcurrency.Value;
         _config.LocalSocks5Port = (int)_numSocks5Port.Value;
         _config.EnableSystemProxy = _chkEnableSystemProxy.Checked;
@@ -1154,77 +1319,68 @@ public partial class MainForm : Form
         SaveUiToConfig();
         _btnTestConnection.Enabled = false;
 
+        // 若当前为 Shadowsocks 协议
+        if (_config.ProtocolType == ProxyProtocolType.Shadowsocks)
+        {
+            AppendLog($"正在测试 Shadowsocks 节点连通性: {_config.ServerHost}:{_config.ServerPort} (算法: {_config.Algorithm})...");
+            try
+            {
+                long latency;
+                if (_engine != null && _engine.IsRunning)
+                {
+                    latency = await _engine.MeasureShadowsocksLatencyAsync();
+                }
+                else
+                {
+                    latency = await ProxyClientEngine.MeasureTcpPingAsync(_config.ServerHost, _config.ServerPort);
+                }
+
+                if (latency >= 0)
+                {
+                    _lblLatency.Text = $"延迟: {latency} ms";
+                    AppendLog($"🎉 [Shadowsocks 测试成功] 网络延迟: {latency} ms (目标: {_config.ServerHost}:{_config.ServerPort})");
+                    MessageBox.Show($"Shadowsocks 节点连接测试成功！\n\n节点地址: {_config.ServerHost}:{_config.ServerPort}\n加密算法: {_config.Algorithm}\n往返延迟: {latency} ms", "测试成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    _lblLatency.Text = "延迟: 超时";
+                    AppendLog($"❌ [Shadowsocks 测试超时] 无法连接到节点 {_config.ServerHost}:{_config.ServerPort}，请检查网络或端口是否放行。");
+                    MessageBox.Show($"无法连接至 Shadowsocks 节点 {_config.ServerHost}:{_config.ServerPort}！\n\n请确认：\n1. 节点服务器 IP 与端口是否被墙或存在防火墙拦截；\n2. 节点密码与加密算法是否填写正确。", "测试超时", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                _lblLatency.Text = "延迟: 异常";
+                AppendLog($"❌ [Shadowsocks 测试异常] {ex.Message}");
+                MessageBox.Show($"测试发生异常: {ex.Message}", "测试异常", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _btnTestConnection.Enabled = true;
+            }
+            return;
+        }
+
+        // 自研 Cloudflare WSS 协议测试
+        AppendLog($"正在测试连接到 {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path})...");
+
+        var sw = Stopwatch.StartNew();
         try
         {
-            if (_engine != null && _engine.IsRunning)
+            using var ws = new ClientWebSocket();
+
+            string scheme = _config.UseTls ? "wss" : "ws";
+            string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
+            
+            string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _config.ServerHost.Trim();
+            var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            if (!string.IsNullOrWhiteSpace(_config.SniHost) && !string.Equals(_config.SniHost.Trim(), _config.ServerHost.Trim(), StringComparison.OrdinalIgnoreCase))
             {
-                // ==================== 模式 A：代理运行中，测试真实端到端出海通畅度 ====================
-                AppendLog($"⚡ [测试连接] 代理运行中，正在通过本地代理 (127.0.0.1:{_config.LocalSocks5Port}) 测试出海网络...");
-
-                // 确保通道就绪 (若刚从休眠唤醒可能正在恢复，主动激活健康校验)
-                await _engine.EnsureHealthyAsync();
-
-                var sw = Stopwatch.StartNew();
-                string resp = "";
-                long ms = 0;
-                bool retryNeeded = false;
-
-                try
-                {
-                    resp = await PerformProxyPingAsync(TimeSpan.FromSeconds(6));
-                    sw.Stop();
-                    ms = sw.ElapsedMilliseconds;
-                }
-                catch
-                {
-                    retryNeeded = true;
-                }
-
-                // 若首次测试超时/失败 (例如电脑休眠唤醒后首个连接被远端已断开连接所阻碍)，自动触发自愈并重试一次
-                if (retryNeeded || string.IsNullOrEmpty(resp))
-                {
-                    AppendLog("🔄 首次探测未响应，正在触发代理隧道全链路自愈重连并二次探测...");
-                    await _engine.HandleSystemResumeAsync();
-                    await Task.Delay(500);
-
-                    sw.Restart();
-                    resp = await PerformProxyPingAsync(TimeSpan.FromSeconds(7));
-                    sw.Stop();
-                    ms = sw.ElapsedMilliseconds;
-                }
-
-                _lblLatency.Text = $"延迟: {ms} ms";
-
-                string exitIp = "未知";
-                string colo = "未知";
-                foreach (var line in resp.Split('\n'))
-                {
-                    if (line.StartsWith("ip=")) exitIp = line.Substring(3).Trim();
-                    else if (line.StartsWith("colo=")) colo = line.Substring(5).Trim();
-                }
-
-                AppendLog($"🎉 [测试连接成功] 端到端出海延迟: {ms} ms, Cloudflare 边缘机房: {colo}, 出口 IP: {exitIp}");
-                MessageBox.Show($"🎉 代理通道全面通畅！\n\n• 端到端延迟: {ms} ms\n• Cloudflare 机房: {colo}\n• 当前出口 IP: {exitIp}\n• 本地代理: 127.0.0.1:{_config.LocalSocks5Port}\n\n您的网络流量已成功通过加密隧道出海！", "测试连接成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            else
-            {
-                // ==================== 模式 B：代理未启动，测试远端 WebSocket 节点握手与延迟 ====================
-                AppendLog($"正在测试连接到 {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path})...");
-
-                var sw = Stopwatch.StartNew();
-                string scheme = _config.UseTls ? "wss" : "ws";
-                string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
-                string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _config.ServerHost.Trim();
-                var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
-
-                using var ws = new ClientWebSocket();
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-
-                // 明确设置不走系统代理 (避免历史残留系统代理拦截)
                 var handler = new SocketsHttpHandler
                 {
-                    Proxy = null,
-                    UseProxy = false,
                     ConnectCallback = async (context, ct) =>
                     {
                         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -1232,20 +1388,24 @@ public partial class MainForm : Form
                         return new NetworkStream(socket, ownsSocket: true);
                     }
                 };
-
                 var invoker = new HttpMessageInvoker(handler);
                 await ws.ConnectAsync(uri, invoker, cts.Token);
-                sw.Stop();
-
-                _lblLatency.Text = $"延迟: {sw.ElapsedMilliseconds} ms";
-                AppendLog($"🎉 测试连接成功！往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost} -> SNI: {targetDomain})");
-                MessageBox.Show($"连接成功！\n节点: {_config.ServerHost}:{_config.ServerPort}\nSNI: {targetDomain}\n握手延迟: {sw.ElapsedMilliseconds} ms", "测试连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Test Done", CancellationToken.None);
             }
+            else
+            {
+                ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
+                await ws.ConnectAsync(uri, cts.Token);
+            }
+
+            sw.Stop();
+
+            AppendLog($"🎉 测试连接成功！往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost} -> SNI: {targetDomain})");
+            MessageBox.Show($"连接成功！\n节点: {_config.ServerHost}:{_config.ServerPort}\nSNI: {targetDomain}\n握手延迟: {sw.ElapsedMilliseconds} ms", "测试连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Test Done", CancellationToken.None);
         }
         catch (Exception ex)
         {
-            _lblLatency.Text = "延迟: 超时";
+            sw.Stop();
             AppendLog($"❌ 测试连接失败: {ex.Message}");
 
             string hint = "";
@@ -1272,61 +1432,12 @@ public partial class MainForm : Form
             {
                 hint = "\r\n\r\n💡【错误诊断 (返回 400 BadRequest)】：请求未被识别为合法 WebSocket，中间代理可能篡改了 Upgrade 请求头。";
             }
-            else if (ex.Message.Contains("由于目标计算机积极拒绝") || ex.Message.Contains("No connection could be made"))
-            {
-                hint = "\r\n\r\n💡【错误诊断】：目标端口未开启或本地代理服务未就绪，若电脑刚从休眠中唤醒请等待 2 秒网络重连后重试。";
-            }
 
             MessageBox.Show($"测试连接失败！\r\n错误信息: {ex.Message}{hint}", "测试结果诊断", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         finally
         {
             _btnTestConnection.Enabled = true;
-        }
-    }
-
-    private async Task<string> PerformProxyPingAsync(TimeSpan timeout)
-    {
-        var proxy = new WebProxy($"http://127.0.0.1:{_config.LocalSocks5Port}");
-        var handler = new HttpClientHandler
-        {
-            Proxy = proxy,
-            UseProxy = true
-        };
-        using var http = new HttpClient(handler) { Timeout = timeout };
-        return await http.GetStringAsync("https://1.1.1.1/cdn-cgi/trace");
-    }
-
-    private void OnPowerModeChanged(object sender, PowerModeChangedEventArgs e)
-    {
-        if (e.Mode == PowerModes.Resume)
-        {
-            AppendLog("⚠️ 检测到操作系统从休眠/睡眠中唤醒，等待网络适配器重新上线...");
-            // 延迟 1.5 秒等待物理网络（Wi-Fi / 以太网 DHCP）重新获得 IP 地址
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(1500);
-                if (_engine != null && _engine.IsRunning)
-                {
-                    await _engine.HandleSystemResumeAsync();
-                }
-            });
-        }
-    }
-
-    private void OnNetworkAddressChanged(object? sender, EventArgs e)
-    {
-        if (_engine != null && _engine.IsRunning)
-        {
-            // 网络 IP 切换（例如 Wi-Fi 切换或网线插拔），延时微等待后自动触发自愈
-            _ = Task.Run(async () =>
-            {
-                await Task.Delay(1000);
-                if (_engine != null && _engine.IsRunning && _engine.ActiveChannelCount == 0)
-                {
-                    await _engine.HandleSystemResumeAsync();
-                }
-            });
         }
     }
 
@@ -1422,9 +1533,6 @@ public partial class MainForm : Form
         _speedTimer.Dispose();
         _logFlushTimer.Stop();
         _logFlushTimer.Dispose();
-
-        SystemEvents.PowerModeChanged -= OnPowerModeChanged;
-        NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
 
         if (_engine != null)
         {

@@ -22,7 +22,8 @@ namespace Proxy.Client.Core.Socks5;
 public sealed class LocalSocks5Server : IAsyncDisposable
 {
     private readonly ProxyClientConfig _config;
-    private readonly TunnelTransport _transport;
+    private readonly TunnelTransport? _transport;
+    private readonly int? _upstreamSocks5Port;
     private readonly BypassManager _bypassManager;
     private readonly ProcessBypassManager _processBypassManager;
     private readonly IPAddress? _physicalIp;
@@ -33,12 +34,20 @@ public sealed class LocalSocks5Server : IAsyncDisposable
     private Task? _listenTask;
     private bool _disposed;
 
-    public event Action<string>? LogMessage;
+    private long _totalUploadBytes;
+    private long _totalDownloadBytes;
 
-    public LocalSocks5Server(ProxyClientConfig config, TunnelTransport transport)
+    public event Action<string>? LogMessage;
+    public event Action<long, long>? TrafficUpdated;
+
+    public long TotalUploadBytes => Volatile.Read(ref _totalUploadBytes);
+    public long TotalDownloadBytes => Volatile.Read(ref _totalDownloadBytes);
+
+    public LocalSocks5Server(ProxyClientConfig config, TunnelTransport? transport, int? upstreamSocks5Port = null)
     {
         _config = config;
         _transport = transport;
+        _upstreamSocks5Port = upstreamSocks5Port;
         _bypassManager = new BypassManager(config.BypassRules);
         _processBypassManager = new ProcessBypassManager(config.GetActiveProcessList());
 
@@ -330,14 +339,28 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
             if (_config.EnableProcessBypass && _config.ProcessFilterMode == ProcessProxyMode.ProxySelected && !string.IsNullOrEmpty(matchedProc))
             {
-                LogMessage?.Invoke($"[应用白名单代理] {matchedProc} -> {resolvedDomain}:{targetPort} (命中选中代理名单 -> 隧道)");
+                string protoName = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? "Shadowsocks 节点" : "隧道";
+                LogMessage?.Invoke($"[应用白名单代理] {matchedProc} -> {resolvedDomain}:{targetPort} (命中选中代理名单 -> {protoName})");
             }
             else
             {
-                LogMessage?.Invoke($"[隧道代理] {resolvedDomain}:{targetPort} -> Cloudflare Tunnel");
+                string protoName = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? "Shadowsocks 出站" : "Cloudflare Tunnel";
+                LogMessage?.Invoke($"[代理转发] {resolvedDomain}:{targetPort} -> {protoName}");
             }
 
-            // ==================== 4. 远端加密隧道转发 ====================
+            // ==================== 4. 远端出站转发 (支持 Shadowsocks 及 Cloudflare WSS 隧道) ====================
+            if (_config.ProtocolType == ProxyProtocolType.Shadowsocks && _upstreamSocks5Port.HasValue)
+            {
+                await HandleUpstreamSocks5ForwardAsync(stream, targetHost, targetPort, protoAddrType, initialData);
+                return;
+            }
+
+            if (_transport == null)
+            {
+                LogMessage?.Invoke($"[出站异常] 传输通道未初始化，无法转发 {targetHost}:{targetPort}");
+                return;
+            }
+
             sessionId = _transport.NextSessionId();
 
             _transport.SubscribeSession(sessionId, frame =>
@@ -403,8 +426,155 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             ArrayPool<byte>.Shared.Return(buffer);
             if (sessionId > 0)
             {
-                _transport.UnsubscribeSession(sessionId);
+                _transport?.UnsubscribeSession(sessionId);
             }
+        }
+    }
+
+    /// <summary>
+    /// 将需代理的流量通过上游 SOCKS5 桥接通道转发给 sing-box (对接 Shadowsocks / SS-2022 节点)
+    /// </summary>
+    private async Task HandleUpstreamSocks5ForwardAsync(
+        NetworkStream clientStream,
+        string targetHost,
+        ushort targetPort,
+        AddressType protoAddrType,
+        ReadOnlyMemory<byte> initialData)
+    {
+        using var upstreamClient = new TcpClient { NoDelay = true };
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, timeoutCts.Token);
+
+        try
+        {
+            await upstreamClient.ConnectAsync("127.0.0.1", _upstreamSocks5Port!.Value, linkedCts.Token);
+            using var upstreamStream = upstreamClient.GetStream();
+
+            // 1. SOCKS5 握手认证 [0x05, 0x01, 0x00]
+            await upstreamStream.WriteAsync(new byte[] { 0x05, 0x01, 0x00 }, linkedCts.Token);
+            byte[] authResp = new byte[2];
+            await upstreamStream.ReadExactlyAsync(authResp.AsMemory(0, 2), linkedCts.Token);
+            if (authResp[0] != 0x05 || authResp[1] != 0x00)
+            {
+                throw new InvalidOperationException("上游核心 SOCKS5 认证握手失败。");
+            }
+
+            // 2. 发起 CONNECT 请求
+            byte[] connectReq;
+            if (protoAddrType == AddressType.IPv4 && IPAddress.TryParse(targetHost, out var ipv4))
+            {
+                connectReq = new byte[10];
+                connectReq[0] = 0x05; connectReq[1] = 0x01; connectReq[2] = 0x00; connectReq[3] = 0x01;
+                ipv4.GetAddressBytes().CopyTo(connectReq, 4);
+                BinaryPrimitives.WriteUInt16BigEndian(connectReq.AsSpan(8, 2), targetPort);
+            }
+            else if (protoAddrType == AddressType.IPv6 && IPAddress.TryParse(targetHost, out var ipv6))
+            {
+                connectReq = new byte[22];
+                connectReq[0] = 0x05; connectReq[1] = 0x01; connectReq[2] = 0x00; connectReq[3] = 0x04;
+                ipv6.GetAddressBytes().CopyTo(connectReq, 4);
+                BinaryPrimitives.WriteUInt16BigEndian(connectReq.AsSpan(20, 2), targetPort);
+            }
+            else
+            {
+                byte[] domainBytes = Encoding.UTF8.GetBytes(targetHost);
+                connectReq = new byte[7 + domainBytes.Length];
+                connectReq[0] = 0x05; connectReq[1] = 0x01; connectReq[2] = 0x00; connectReq[3] = 0x03;
+                connectReq[4] = (byte)domainBytes.Length;
+                Buffer.BlockCopy(domainBytes, 0, connectReq, 5, domainBytes.Length);
+                BinaryPrimitives.WriteUInt16BigEndian(connectReq.AsSpan(5 + domainBytes.Length, 2), targetPort);
+            }
+
+            await upstreamStream.WriteAsync(connectReq, linkedCts.Token);
+
+            // 3. 读取 CONNECT 响应 [0x05, 0x00, 0x00, ATYP, ...]
+            byte[] respHeader = new byte[4];
+            await upstreamStream.ReadExactlyAsync(respHeader.AsMemory(0, 4), linkedCts.Token);
+            if (respHeader[1] != 0x00)
+            {
+                throw new InvalidOperationException($"上游代理连接目标失败 (REP: 0x{respHeader[1]:X2})。");
+            }
+
+            // 读取剩余的绑定地址
+            byte atyp = respHeader[3];
+            int remainLen = atyp switch
+            {
+                0x01 => 6,
+                0x04 => 18,
+                0x03 => 1,
+                _ => 6
+            };
+
+            if (atyp == 0x03)
+            {
+                byte[] lenBuf = new byte[1];
+                await upstreamStream.ReadExactlyAsync(lenBuf.AsMemory(0, 1), linkedCts.Token);
+                int dLen = lenBuf[0] + 2;
+                byte[] dummy = new byte[dLen];
+                await upstreamStream.ReadExactlyAsync(dummy.AsMemory(0, dLen), linkedCts.Token);
+            }
+            else
+            {
+                byte[] dummy = new byte[remainLen];
+                await upstreamStream.ReadExactlyAsync(dummy.AsMemory(0, remainLen), linkedCts.Token);
+            }
+
+            // 若有预读客户端首包，先发给上游
+            if (!initialData.IsEmpty)
+            {
+                await upstreamStream.WriteAsync(initialData, linkedCts.Token);
+                Interlocked.Add(ref _totalUploadBytes, initialData.Length);
+                TrafficUpdated?.Invoke(_totalUploadBytes, _totalDownloadBytes);
+            }
+
+            // 4. 双向数据转发泵 (实时统计上下行流量)
+            var pumpToUpstream = Task.Run(async () =>
+            {
+                byte[] buf = ArrayPool<byte>.Shared.Rent(64 * 1024);
+                try
+                {
+                    while (!_cts.IsCancellationRequested)
+                    {
+                        int n = await clientStream.ReadAsync(buf, _cts.Token);
+                        if (n <= 0) break;
+                        await upstreamStream.WriteAsync(buf.AsMemory(0, n), _cts.Token);
+                        Interlocked.Add(ref _totalUploadBytes, n);
+                        TrafficUpdated?.Invoke(_totalUploadBytes, _totalDownloadBytes);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buf);
+                }
+            });
+
+            var pumpToClient = Task.Run(async () =>
+            {
+                byte[] buf = ArrayPool<byte>.Shared.Rent(64 * 1024);
+                try
+                {
+                    while (!_cts.IsCancellationRequested)
+                    {
+                        int n = await upstreamStream.ReadAsync(buf, _cts.Token);
+                        if (n <= 0) break;
+                        await clientStream.WriteAsync(buf.AsMemory(0, n), _cts.Token);
+                        Interlocked.Add(ref _totalDownloadBytes, n);
+                        TrafficUpdated?.Invoke(_totalUploadBytes, _totalDownloadBytes);
+                    }
+                }
+                catch { }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buf);
+                }
+            });
+
+            await Task.WhenAny(pumpToUpstream, pumpToClient);
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"[Shadowsocks 转发异常] {targetHost}:{targetPort} -> {ex.Message}");
         }
     }
 

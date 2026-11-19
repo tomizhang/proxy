@@ -7,6 +7,7 @@ namespace Proxy.Common.Models;
 /// </summary>
 [JsonSourceGenerationOptions(WriteIndented = false, PropertyNamingPolicy = JsonKnownNamingPolicy.Unspecified)]
 [JsonSerializable(typeof(ProxyClientConfig))]
+[JsonSerializable(typeof(ProxyProtocolType))]
 [JsonSerializable(typeof(ProcessProxyMode))]
 [JsonSerializable(typeof(ProxyServerConfig))]
 public partial class ProxyJsonContext : JsonSerializerContext
