@@ -327,7 +327,7 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             // 3.2 应用程序名单分流判断 (支持“仅直连选中应用”或“只为选中应用代理”)
             string matchedProc = string.Empty;
             if (_config.EnableProcessBypass &&
-                _processBypassManager.ShouldBypass(clientPort, resolvedDomain, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason))
+                _processBypassManager.ShouldBypass(clientPort, resolvedDomain, targetPort, _config.ProcessFilterMode, out matchedProc, out var bypassReason, rawTargetHost: targetHost))
             {
                 if (!string.IsNullOrEmpty(bypassReason))
                 {
@@ -345,7 +345,8 @@ public sealed class LocalSocks5Server : IAsyncDisposable
             else
             {
                 string protoName = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? "Shadowsocks 出站" : "Cloudflare Tunnel";
-                LogMessage?.Invoke($"[代理转发] {resolvedDomain}:{targetPort} -> {protoName}");
+                string procPrefix = !string.IsNullOrEmpty(matchedProc) ? $"[{matchedProc}] " : "";
+                LogMessage?.Invoke($"[代理转发] {procPrefix}{resolvedDomain}:{targetPort} -> {protoName}");
             }
 
             // ==================== 4. 远端出站转发 (支持 Shadowsocks 及 Cloudflare WSS 隧道) ====================

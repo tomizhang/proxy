@@ -73,7 +73,7 @@ public sealed class ProcessBypassManager
         if (_bypassedProcesses.Contains(name)) return true;
 
         // 智能关联：若名单中包含 antigravity，自动覆盖其附属服务 language_server
-        if (name == "language_server" || name == "language_server.exe")
+        if (name.Contains("language_server"))
         {
             if (_bypassedProcesses.Contains("antigravity") || _bypassedProcesses.Contains("antigravity.exe"))
             {
@@ -81,8 +81,8 @@ public sealed class ProcessBypassManager
             }
         }
 
-        // 智能关联：若名单中包含 code 或 cursor，自动覆盖其相关辅助进程
-        if ((name.StartsWith("code") || name.StartsWith("cursor")) &&
+        // 智能关联：若名单中包含 code 或 cursor，自动覆盖其相关辅助进程 (如 code-tunnel, cursor-helper)
+        if ((name.StartsWith("code-") || name.StartsWith("cursor-")) &&
             (_bypassedProcesses.Contains("code") || _bypassedProcesses.Contains("code.exe") ||
              _bypassedProcesses.Contains("cursor") || _bypassedProcesses.Contains("cursor.exe")))
         {
@@ -95,7 +95,7 @@ public sealed class ProcessBypassManager
     /// <summary>
     /// 解析请求的发起源进程名称
     /// </summary>
-    public string? ResolveOriginProcess(int clientPort, string targetHost, int targetPort)
+    public string? ResolveOriginProcess(int clientPort, string targetHost, int targetPort, string? rawTargetHost = null)
     {
         var clientProc = GetProcessInfoByPort(clientPort);
         if (!string.IsNullOrEmpty(clientProc))
@@ -103,13 +103,13 @@ public sealed class ProcessBypassManager
             if (clientProc.Equals("tun2socks", StringComparison.OrdinalIgnoreCase) ||
                 clientProc.Equals("tun2socks.exe", StringComparison.OrdinalIgnoreCase))
             {
-                var tunOriginProc = FindOriginProcessForTun(targetHost, targetPort);
+                var tunOriginProc = FindOriginProcessForTun(rawTargetHost, targetHost, targetPort);
                 return !string.IsNullOrEmpty(tunOriginProc) ? tunOriginProc : clientProc;
             }
             return clientProc;
         }
 
-        return FindOriginProcessForTun(targetHost, targetPort);
+        return FindOriginProcessForTun(rawTargetHost, targetHost, targetPort);
     }
 
     /// <summary>
@@ -121,12 +121,13 @@ public sealed class ProcessBypassManager
         int targetPort,
         ProcessProxyMode mode,
         out string matchedProcess,
-        out string logReason)
+        out string logReason,
+        string? rawTargetHost = null)
     {
         matchedProcess = string.Empty;
         logReason = string.Empty;
 
-        string? proc = ResolveOriginProcess(clientPort, targetHost, targetPort);
+        string? proc = ResolveOriginProcess(clientPort, targetHost, targetPort, rawTargetHost);
         bool hasProc = !string.IsNullOrEmpty(proc);
         bool isMatched = hasProc && IsProcessMatched(proc!);
 
@@ -157,6 +158,7 @@ public sealed class ProcessBypassManager
                 return true;
             }
 
+            matchedProcess = hasProc ? proc! : string.Empty;
             return false;
         }
     }
@@ -210,10 +212,22 @@ public sealed class ProcessBypassManager
         var now = DateTime.UtcNow;
         if (_portCache.TryGetValue(localPort, out var cached) && cached.Expiry > now)
         {
-            return cached.Name;
+            // 校验缓存的 PID 是否仍然存活且名称未变，避免端口复用导致的归属错误
+            try
+            {
+                using var p = Process.GetProcessById(cached.Pid);
+                if (!p.HasExited && string.Equals(p.ProcessName, cached.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return cached.Name;
+                }
+            }
+            catch
+            {
+                _portCache.TryRemove(localPort, out _);
+            }
         }
 
-        // 定期惰性修剪过期缓存，防止字典持续堆积
+        // 定期惰性修剪过期缓存
         if (_portCache.Count > 300)
         {
             foreach (var kvp in _portCache)
@@ -237,29 +251,54 @@ public sealed class ProcessBypassManager
         string? name = GetProcessNameByPid(pid);
         if (!string.IsNullOrEmpty(name))
         {
-            _portCache[localPort] = (pid, name, now.AddSeconds(5));
+            // 端口分配频繁轮转，使用 1 秒短缓存降低端口复用误判风险
+            _portCache[localPort] = (pid, name, now.AddSeconds(1));
         }
 
         return name;
     }
 
     /// <summary>
-    /// TUN 模式下，查找发往 targetHost:targetPort 的原始应用程序进程名
+    /// TUN 模式下，查找发往 targetHost:targetPort 的原始应用程序进程名 (精确匹配远端 IP 与端口)
     /// </summary>
-    private string? FindOriginProcessForTun(string targetHost, int targetPort)
+    private string? FindOriginProcessForTun(string? rawTargetHost, string? targetHost, int targetPort)
     {
         if (targetPort <= 0) return null;
 
-        IPAddress? targetIp = null;
-        if (IPAddress.TryParse(targetHost, out var parsedIp))
+        // 1. 优先尝试从原始目标 IP 解析 (TUN 模式下 rawTargetHost 通常为真实的远端 IP)
+        if (!string.IsNullOrWhiteSpace(rawTargetHost) && IPAddress.TryParse(rawTargetHost, out var ip1))
         {
-            targetIp = parsedIp;
+            int pid = GetPidByRemoteEndpoint(ip1, targetPort);
+            if (pid > 0) return GetProcessNameByPid(pid);
         }
 
-        int pid = GetPidByRemoteEndpoint(targetIp, targetPort);
-        if (pid > 0)
+        // 2. 尝试从 targetHost 解析目标 IP
+        if (!string.IsNullOrWhiteSpace(targetHost) && IPAddress.TryParse(targetHost, out var ip2))
         {
-            return GetProcessNameByPid(pid);
+            int pid = GetPidByRemoteEndpoint(ip2, targetPort);
+            if (pid > 0) return GetProcessNameByPid(pid);
+        }
+
+        // 3. 若均为域名，尝试通过 DNS 获取候选 IP 列表并在 TCP 表中精确查找
+        string? domain = !string.IsNullOrWhiteSpace(targetHost) && !IPAddress.TryParse(targetHost, out _)
+            ? targetHost
+            : (!string.IsNullOrWhiteSpace(rawTargetHost) && !IPAddress.TryParse(rawTargetHost, out _) ? rawTargetHost : null);
+
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            try
+            {
+                var ips = Dns.GetHostAddresses(domain);
+                foreach (var addr in ips)
+                {
+                    int pid = GetPidByRemoteEndpoint(addr, targetPort);
+                    if (pid > 0) return GetProcessNameByPid(pid);
+                }
+            }
+            catch
+            {
+                // 忽略 DNS 探测异常
+            }
         }
 
         return null;
@@ -279,7 +318,7 @@ public sealed class ProcessBypassManager
             return cached.Name;
         }
 
-        if (_pidNameCache.Count > 100)
+        if (_pidNameCache.Count > 200)
         {
             foreach (var kvp in _pidNameCache)
             {
@@ -294,7 +333,7 @@ public sealed class ProcessBypassManager
         {
             using var proc = Process.GetProcessById(pid);
             string name = proc.ProcessName;
-            _pidNameCache[pid] = (name, now.AddSeconds(30));
+            _pidNameCache[pid] = (name, now.AddSeconds(10));
             return name;
         }
         catch
@@ -347,6 +386,7 @@ public sealed class ProcessBypassManager
 
             int numEntries = Marshal.ReadInt32(buffer);
             IntPtr rowPtr = IntPtr.Add(buffer, 4);
+            int fallbackPid = -1;
 
             if (af == AF_INET)
             {
@@ -360,7 +400,21 @@ public sealed class ProcessBypassManager
 
                     if (port == targetPort)
                     {
-                        return Marshal.ReadInt32(current, 20);
+                        int state = Marshal.ReadInt32(current, 0);
+                        int pid = Marshal.ReadInt32(current, 20);
+                        if (pid > 4)
+                        {
+                            // 优先匹配活跃连接 (ESTABLISHED = 5, SYN_SENT = 3, SYN_RCVD = 4)
+                            if (state == 5 || state == 3 || state == 4)
+                            {
+                                return pid;
+                            }
+                            // 过滤已关闭/TIME_WAIT (11, 12, 1) 的陈旧条目
+                            if (fallbackPid == -1 && state != 11 && state != 12 && state != 1)
+                            {
+                                fallbackPid = pid;
+                            }
+                        }
                     }
                 }
             }
@@ -376,30 +430,59 @@ public sealed class ProcessBypassManager
 
                     if (port == targetPort)
                     {
-                        return Marshal.ReadInt32(current, 52);
+                        int state = Marshal.ReadInt32(current, 48);
+                        int pid = Marshal.ReadInt32(current, 52);
+                        if (pid > 4)
+                        {
+                            if (state == 5 || state == 3 || state == 4)
+                            {
+                                return pid;
+                            }
+                            if (fallbackPid == -1 && state != 11 && state != 12 && state != 1)
+                            {
+                                fallbackPid = pid;
+                            }
+                        }
                     }
                 }
             }
+
+            return fallbackPid;
         }
         catch
         {
-            // 忽略读取异常
+            return -1;
         }
         finally
         {
             Marshal.FreeHGlobal(buffer);
         }
+    }
+
+    /// <summary>
+    /// 根据远端 IP 和远端端口在 Windows TCP 表中查找对应的拥有进程 PID (用于 TUN 模式精准溯源)
+    /// </summary>
+    public static int GetPidByRemoteEndpoint(IPAddress? remoteIp, int remotePort)
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows) || remoteIp == null || remotePort <= 0)
+        {
+            return -1;
+        }
+
+        if (remoteIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            return QueryPidByRemoteEndpointV4(remoteIp, remotePort);
+        }
+        else if (remoteIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            return QueryPidByRemoteEndpointV6(remoteIp, remotePort);
+        }
 
         return -1;
     }
 
-    /// <summary>
-    /// 根据远端 IP 和远端端口在 Windows TCP 表中查找对应的拥有进程 PID (用于 TUN 模式溯源)
-    /// </summary>
-    public static int GetPidByRemoteEndpoint(IPAddress? remoteIp, int remotePort)
+    private static int QueryPidByRemoteEndpointV4(IPAddress remoteIp, int remotePort)
     {
-        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return -1;
-
         int size = 0;
         uint res = GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
         if (size <= 0) return -1;
@@ -413,14 +496,9 @@ public sealed class ProcessBypassManager
             int numEntries = Marshal.ReadInt32(buffer);
             IntPtr rowPtr = IntPtr.Add(buffer, 4);
 
-            uint targetAddrUint = 0;
-            if (remoteIp != null && remoteIp.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-            {
-                byte[] bytes = remoteIp.GetAddressBytes();
-                targetAddrUint = BitConverter.ToUInt32(bytes, 0);
-            }
-
-            int bestMatchPid = -1;
+            byte[] bytes = remoteIp.GetAddressBytes();
+            uint targetAddrUint = BitConverter.ToUInt32(bytes, 0);
+            int fallbackPid = -1;
 
             for (int i = 0; i < numEntries; i++)
             {
@@ -428,26 +506,92 @@ public sealed class ProcessBypassManager
                 int rawRemotePort = Marshal.ReadInt32(current, 16);
                 ushort port = (ushort)(((rawRemotePort & 0xFF) << 8) | ((rawRemotePort >> 8) & 0xFF));
 
+                // 必须严格同时匹配远端端口与远端 IP，绝不可仅匹配端口以避免串流误判
                 if (port == remotePort)
                 {
                     uint remoteAddr = (uint)Marshal.ReadInt32(current, 12);
-                    int pid = Marshal.ReadInt32(current, 20);
-
-                    if (targetAddrUint != 0 && remoteAddr == targetAddrUint)
+                    if (remoteAddr == targetAddrUint)
                     {
-                        // IP 和 端口 完全精确匹配
-                        return pid;
-                    }
+                        int state = Marshal.ReadInt32(current, 0);
+                        int pid = Marshal.ReadInt32(current, 20);
 
-                    // 端口命中备选
-                    if (bestMatchPid == -1 && pid > 4)
-                    {
-                        bestMatchPid = pid;
+                        if (pid > 4)
+                        {
+                            // 优先返回活跃建立的连接
+                            if (state == 5 || state == 3 || state == 4)
+                            {
+                                return pid;
+                            }
+                            if (fallbackPid == -1 && state != 11 && state != 12 && state != 1)
+                            {
+                                fallbackPid = pid;
+                            }
+                        }
                     }
                 }
             }
 
-            return bestMatchPid;
+            return fallbackPid;
+        }
+        catch
+        {
+            return -1;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static int QueryPidByRemoteEndpointV6(IPAddress remoteIp, int remotePort)
+    {
+        int size = 0;
+        uint res = GetExtendedTcpTable(IntPtr.Zero, ref size, false, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0);
+        if (size <= 0) return -1;
+
+        IntPtr buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            res = GetExtendedTcpTable(buffer, ref size, false, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0);
+            if (res != 0) return -1;
+
+            int numEntries = Marshal.ReadInt32(buffer);
+            IntPtr rowPtr = IntPtr.Add(buffer, 4);
+
+            byte[] targetBytes = remoteIp.GetAddressBytes();
+            byte[] rowRemoteBytes = new byte[16];
+            int fallbackPid = -1;
+
+            for (int i = 0; i < numEntries; i++)
+            {
+                IntPtr current = IntPtr.Add(rowPtr, i * 56);
+                int rawRemotePort = Marshal.ReadInt32(current, 44);
+                ushort port = (ushort)(((rawRemotePort & 0xFF) << 8) | ((rawRemotePort >> 8) & 0xFF));
+
+                if (port == remotePort)
+                {
+                    Marshal.Copy(IntPtr.Add(current, 24), rowRemoteBytes, 0, 16);
+                    if (rowRemoteBytes.AsSpan().SequenceEqual(targetBytes))
+                    {
+                        int state = Marshal.ReadInt32(current, 48);
+                        int pid = Marshal.ReadInt32(current, 52);
+
+                        if (pid > 4)
+                        {
+                            if (state == 5 || state == 3 || state == 4)
+                            {
+                                return pid;
+                            }
+                            if (fallbackPid == -1 && state != 11 && state != 12 && state != 1)
+                            {
+                                fallbackPid = pid;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return fallbackPid;
         }
         catch
         {

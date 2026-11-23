@@ -76,4 +76,48 @@ public class ProcessBypassManagerTests
         Assert.Equal(expectedBypass, bypass);
         Assert.NotEmpty(log);
     }
+
+    [Theory]
+    [InlineData("code.exe", true)]
+    [InlineData("code", true)]
+    [InlineData("code-tunnel.exe", true)]
+    [InlineData("cursor.exe", true)]
+    [InlineData("cursor-helper.exe", true)]
+    [InlineData("codex.exe", false)]       // 不应被误判匹配
+    [InlineData("codec.exe", false)]       // 不应被误判匹配
+    [InlineData("cursorial.exe", false)]   // 不应被误判匹配
+    public void IsProcessMatched_StrictPrefixAndExactMatching(string procName, bool expected)
+    {
+        var manager = new ProcessBypassManager("code.exe;cursor.exe");
+        bool matched = manager.IsProcessMatched(procName);
+        Assert.Equal(expected, matched);
+    }
+
+    [Fact]
+    public void GetPidByRemoteEndpoint_NullOrInvalid_ReturnsNegative()
+    {
+        int pidNull = ProcessBypassManager.GetPidByRemoteEndpoint(null, 443);
+        Assert.Equal(-1, pidNull);
+
+        int pidInvalidPort = ProcessBypassManager.GetPidByRemoteEndpoint(System.Net.IPAddress.Loopback, 0);
+        Assert.Equal(-1, pidInvalidPort);
+    }
+
+    [Fact]
+    public void ShouldBypass_WithRawTargetHost_ExecutesWithoutError()
+    {
+        var manager = new ProcessBypassManager("chrome.exe");
+        bool bypass = manager.ShouldBypass(
+            clientPort: 99999, // 非法/不存在端口
+            targetHost: "www.google.com",
+            targetPort: 443,
+            mode: Proxy.Common.Models.ProcessProxyMode.ProxySelected,
+            matchedProcess: out var matchedProc,
+            logReason: out var logReason,
+            rawTargetHost: "142.250.190.46");
+
+        // 端口不存在，识别为非代理名单应用，在仅代理模式下直连
+        Assert.True(bypass);
+        Assert.NotEmpty(logReason);
+    }
 }
