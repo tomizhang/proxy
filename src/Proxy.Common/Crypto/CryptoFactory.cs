@@ -17,14 +17,39 @@ public static class CryptoFactory
         Plain
     ];
 
+    public static string NormalizeAlgorithm(string? algorithm)
+    {
+        string raw = (algorithm ?? string.Empty).Trim().ToLowerInvariant();
+        if (raw.Contains("aes-256-gcm") || raw == "aes" || raw == "gcm" || raw.Contains("消息加密"))
+        {
+            if (raw.Contains("chacha")) return ChaCha20Poly1305;
+            return Aes256Gcm;
+        }
+        if (raw.Contains("chacha"))
+        {
+            return ChaCha20Poly1305;
+        }
+        if (raw.Contains("custom-obfs") || raw == "custom" || raw == "obfs" || raw.Contains("简单加密"))
+        {
+            return CustomObfs;
+        }
+        if (raw.Contains("plain") || raw == "none" || raw == "raw" || raw.Contains("急速") || raw.Contains("极速"))
+        {
+            return Plain;
+        }
+
+        return string.IsNullOrEmpty(raw) ? Aes256Gcm : raw;
+    }
+
     public static ICryptoProvider Create(string algorithm, string password)
     {
-        return (algorithm?.Trim().ToLowerInvariant()) switch
+        string normalized = NormalizeAlgorithm(algorithm);
+        return normalized switch
         {
-            Aes256Gcm or "aes" or "gcm" => new AesGcmCryptoProvider(password),
-            ChaCha20Poly1305 or "chacha" or "chacha20" => new ChaCha20Poly1305CryptoProvider(password),
-            CustomObfs or "custom" or "obfs" => new CustomObfsCryptoProvider(password),
-            Plain or "none" => new PlainCryptoProvider(),
+            Aes256Gcm => new AesGcmCryptoProvider(password),
+            ChaCha20Poly1305 => new ChaCha20Poly1305CryptoProvider(password),
+            CustomObfs => new CustomObfsCryptoProvider(password),
+            Plain => new PlainCryptoProvider(),
             _ => throw new NotSupportedException($"不支持的加密算法: {algorithm}")
         };
     }

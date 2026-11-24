@@ -440,10 +440,22 @@ public sealed class TunnelTransport : IAsyncDisposable
                     _webSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
 
                     string scheme = _config.UseTls ? "wss" : "ws";
-                    string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
+                    string rawPath = string.IsNullOrWhiteSpace(_config.Path)
+                        ? (_config.ProtocolType == ProxyProtocolType.HttpRpc ? "/api/v1/stream" : "/tunnel")
+                        : _config.Path;
+                    string cleanPath = rawPath.StartsWith('/') ? rawPath : "/" + rawPath;
 
                     string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _targetHost.Trim();
-                    var uri = new Uri($"{scheme}://{targetDomain}:{_targetPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
+                    string normAlgo = CryptoFactory.NormalizeAlgorithm(_config.Algorithm);
+                    var uri = new Uri($"{scheme}://{targetDomain}:{_targetPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}&algo={Uri.EscapeDataString(normAlgo)}");
+
+                    // 避免常规代理特征头：伪装为合法 WebAPI / 现代浏览器常规请求头，彻底规避防火墙与 DPI 识别
+                    _webSocket.Options.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+                    _webSocket.Options.SetRequestHeader("Accept", "application/octet-stream, */*");
+                    _webSocket.Options.SetRequestHeader("Cache-Control", "no-cache");
+                    _webSocket.Options.SetRequestHeader("Pragma", "no-cache");
+                    _webSocket.Options.SetRequestHeader("X-Session-Token", _config.Password);
+                    _webSocket.Options.SetRequestHeader("X-Algorithm", normAlgo);
 
                     using var connectTimeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_parentToken, _channelCts.Token, connectTimeoutCts.Token);

@@ -339,12 +339,22 @@ public sealed class LocalSocks5Server : IAsyncDisposable
 
             if (_config.EnableProcessBypass && _config.ProcessFilterMode == ProcessProxyMode.ProxySelected && !string.IsNullOrEmpty(matchedProc))
             {
-                string protoName = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? "Shadowsocks 节点" : "隧道";
+                string protoName = _config.ProtocolType switch
+                {
+                    ProxyProtocolType.Shadowsocks => "Shadowsocks 节点",
+                    ProxyProtocolType.HttpRpc => "HTTP-RPC 隧道",
+                    _ => "WSS 隧道"
+                };
                 LogMessage?.Invoke($"[应用白名单代理] {matchedProc} -> {resolvedDomain}:{targetPort} (命中选中代理名单 -> {protoName})");
             }
             else
             {
-                string protoName = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? "Shadowsocks 出站" : "Cloudflare Tunnel";
+                string protoName = _config.ProtocolType switch
+                {
+                    ProxyProtocolType.Shadowsocks => "Shadowsocks 出站",
+                    ProxyProtocolType.HttpRpc => "HTTP-RPC 极速隧道",
+                    _ => "Cloudflare Tunnel"
+                };
                 string procPrefix = !string.IsNullOrEmpty(matchedProc) ? $"[{matchedProc}] " : "";
                 LogMessage?.Invoke($"[代理转发] {procPrefix}{resolvedDomain}:{targetPort} -> {protoName}");
             }

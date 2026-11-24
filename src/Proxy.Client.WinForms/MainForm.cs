@@ -40,7 +40,10 @@ public partial class MainForm : Form
 
     // 配置控件
     private ComboBox _cboProtocol = null!;
+    private Button _btnImportSs = null!;
     private Label _lblHostTitle = null!;
+    private Label _lblPathTitle = null!;
+    private Label _lblAlgoTitle = null!;
     private Label _lblCdnTip = null!;
     private Label _lblNodeTag = null!;
     private TabPage _tabNode = null!;
@@ -227,29 +230,34 @@ public partial class MainForm : Form
         _tabNode.BackColor = Color.White;
 
         var lblProtocol = new Label { Text = "代理协议类型:", Location = new Point(12, 16), AutoSize = true, Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold) };
-        _cboProtocol = new ComboBox { Location = new Point(115, 13), Width = 230, DropDownStyle = ComboBoxStyle.DropDownList };
-        _cboProtocol.Items.AddRange(["Cloudflare WSS 隧道 (自研)", "Shadowsocks (SS/SS-2022)"]);
+        _cboProtocol = new ComboBox { Location = new Point(115, 13), Width = 240, DropDownStyle = ComboBoxStyle.DropDownList };
+        _cboProtocol.Items.AddRange(["Cloudflare WSS 隧道 (自研)", "Shadowsocks (SS/SS-2022)", "伪装 HTTP-RPC 极速隧道 (防扫描直连)"]);
         _cboProtocol.SelectedIndexChanged += (s, e) =>
         {
             if (_isLoadingConfig) return;
-            var targetProto = _cboProtocol.SelectedIndex == 1 ? ProxyProtocolType.Shadowsocks : ProxyProtocolType.V2RayWss;
+            var targetProto = _cboProtocol.SelectedIndex switch
+            {
+                1 => ProxyProtocolType.Shadowsocks,
+                2 => ProxyProtocolType.HttpRpc,
+                _ => ProxyProtocolType.V2RayWss
+            };
             _config.ProtocolType = targetProto;
             UpdateProtocolUi(targetProto);
         };
 
-        var btnImportSs = new Button
+        _btnImportSs = new Button
         {
             Text = "📋 导入/粘贴节点链接 (支持 ss://)",
-            Location = new Point(360, 11),
-            Size = new Size(240, 30),
+            Location = new Point(365, 11),
+            Size = new Size(235, 30),
             BackColor = Color.FromArgb(102, 51, 153), // 优雅紫色
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
             Cursor = Cursors.Hand
         };
-        btnImportSs.FlatAppearance.BorderSize = 0;
-        btnImportSs.Click += (s, e) => OnImportSsClicked();
+        _btnImportSs.FlatAppearance.BorderSize = 0;
+        _btnImportSs.Click += (s, e) => OnImportSsClicked();
 
         _lblNodeTag = new Label
         {
@@ -273,7 +281,7 @@ public partial class MainForm : Form
             if (_chkUseTls.Checked && _numPort.Value == 5000) _numPort.Value = 443;
         };
 
-        var lblPath = new Label { Text = "WebSocket 路径:", Location = new Point(12, 86), AutoSize = true };
+        _lblPathTitle = new Label { Text = "WebSocket 路径:", Location = new Point(12, 86), AutoSize = true };
         _txtPath = new TextBox { Location = new Point(135, 83), Width = 210, Text = "/tunnel" };
 
         var lblSni = new Label { Text = "真实域名 (SNI/Host):", Location = new Point(360, 86), AutoSize = true };
@@ -282,10 +290,21 @@ public partial class MainForm : Form
         var lblPwd = new Label { Text = "认证密码 / 密钥:", Location = new Point(12, 120), AutoSize = true };
         _txtPassword = new TextBox { Location = new Point(135, 117), Width = 295, UseSystemPasswordChar = true };
 
-        var lblAlgo = new Label { Text = "加密算法:", Location = new Point(445, 120), AutoSize = true };
+        _lblAlgoTitle = new Label { Text = "加密模式:", Location = new Point(445, 120), AutoSize = true };
         _cboAlgo = new ComboBox { Location = new Point(515, 117), Width = 215, DropDownStyle = ComboBoxStyle.DropDown };
-        _cboAlgo.Items.AddRange(CryptoFactory.SupportedAlgorithms);
-        _cboAlgo.Items.AddRange(["2022-blake3-aes-256-gcm", "2022-blake3-aes-128-gcm", "2022-blake3-chacha20-poly1305", "chacha20-ietf-poly1305"]);
+        _cboAlgo.Items.AddRange([
+            "🛡️ 消息加密 (强安全 - AES-256-GCM)",
+            "🛡️ 消息加密 (强安全 - ChaCha20-Poly1305)",
+            "⚡ 简单加密 (动态混淆 - custom-obfs)",
+            "🚀 急速模式 (极速直通 - plain)",
+            "2022-blake3-aes-256-gcm",
+            "2022-blake3-aes-128-gcm",
+            "2022-blake3-chacha20-poly1305",
+            "chacha20-ietf-poly1305",
+            "aes-256-gcm",
+            "custom-obfs",
+            "plain"
+        ]);
 
         var lblConcurrency = new Label { Text = "并发加速通道数:", Location = new Point(12, 152), AutoSize = true };
         _numConcurrency = new NumericUpDown { Location = new Point(135, 149), Width = 70, Minimum = 1, Maximum = 16, Value = 4 };
@@ -360,10 +379,10 @@ public partial class MainForm : Form
         pnlActions.Controls.AddRange([_btnConnectBottom, _btnTestConnection, btnSaveConfig]);
 
         _tabNode.Controls.AddRange([
-            lblProtocol, _cboProtocol, btnImportSs, _lblNodeTag,
+            lblProtocol, _cboProtocol, _btnImportSs, _lblNodeTag,
             _lblHostTitle, _txtHost, lblPort, _numPort, _chkUseTls,
-            lblPath, _txtPath, lblSni, _txtSni,
-            lblPwd, _txtPassword, lblAlgo, _cboAlgo,
+            _lblPathTitle, _txtPath, lblSni, _txtSni,
+            lblPwd, _txtPassword, _lblAlgoTitle, _cboAlgo,
             lblConcurrency, _numConcurrency, lblConcurrencyTip,
             _lblCdnTip,
             pnlActions
@@ -736,7 +755,12 @@ public partial class MainForm : Form
         _isLoadingConfig = true;
         try
         {
-            _cboProtocol.SelectedIndex = _config.ProtocolType == ProxyProtocolType.Shadowsocks ? 1 : 0;
+            _cboProtocol.SelectedIndex = _config.ProtocolType switch
+            {
+                ProxyProtocolType.Shadowsocks => 1,
+                ProxyProtocolType.HttpRpc => 2,
+                _ => 0
+            };
             _lblNodeTag.Text = !string.IsNullOrEmpty(_config.NodeName) ? $"节点: {_config.NodeName}" : "";
             UpdateProtocolUi(_config.ProtocolType);
 
@@ -747,11 +771,23 @@ public partial class MainForm : Form
             _txtSni.Text = _config.SniHost ?? "";
             _txtPassword.Text = _config.Password;
 
-            if (!_cboAlgo.Items.Contains(_config.Algorithm))
+            string normAlgo = CryptoFactory.NormalizeAlgorithm(_config.Algorithm);
+            string algoDisplay = normAlgo switch
             {
-                _cboAlgo.Items.Add(_config.Algorithm);
+                CryptoFactory.CustomObfs => "⚡ 简单加密 (动态混淆 - custom-obfs)",
+                CryptoFactory.Plain => "🚀 急速模式 (极速直通 - plain)",
+                CryptoFactory.ChaCha20Poly1305 => "🛡️ 消息加密 (强安全 - ChaCha20-Poly1305)",
+                _ => "🛡️ 消息加密 (强安全 - AES-256-GCM)"
+            };
+            if (_config.ProtocolType == ProxyProtocolType.Shadowsocks)
+            {
+                algoDisplay = _config.Algorithm;
             }
-            _cboAlgo.Text = _config.Algorithm;
+            if (!_cboAlgo.Items.Contains(algoDisplay))
+            {
+                _cboAlgo.Items.Add(algoDisplay);
+            }
+            _cboAlgo.Text = algoDisplay;
 
             _numConcurrency.Value = Math.Clamp(_config.ConcurrencyChannels, 1, 16);
             _numSocks5Port.Value = _config.LocalSocks5Port;
@@ -772,24 +808,56 @@ public partial class MainForm : Form
 
     private void UpdateProtocolUi(ProxyProtocolType proto)
     {
-        if (proto == ProxyProtocolType.Shadowsocks)
+        if (proto == ProxyProtocolType.HttpRpc)
+        {
+            _tabNode.Text = "  远程节点配置 (伪装 HTTP-RPC 极速隧道)  ";
+            _lblHostTitle.Text = "服务器地址 (IP):";
+            _lblPathTitle.Text = "伪装 API 路径:";
+            _lblAlgoTitle.Text = "传输加密模式:";
+            _txtPath.Enabled = true;
+            _txtPath.BackColor = Color.White;
+            if (string.IsNullOrWhiteSpace(_txtPath.Text) || _txtPath.Text == "/tunnel")
+            {
+                _txtPath.Text = "/api/v1/stream";
+            }
+            _chkUseTls.Enabled = true;
+            _txtSni.Enabled = false;
+            _txtSni.BackColor = Color.FromArgb(245, 245, 245);
+            _numConcurrency.Enabled = true;
+            _btnImportSs.Visible = false;
+            _lblNodeTag.Text = "⚡ 直连防扫描";
+            _lblCdnTip.Text = "💡 防火墙免疫提示：HTTP-RPC 伪装成合法 WebAPI 双向流式 RPC，无常规代理特征头，并具有防主动探测功能；提供【消息加密】、【简单加密】与【急速模式】。";
+        }
+        else if (proto == ProxyProtocolType.Shadowsocks)
         {
             _tabNode.Text = "  远程节点配置 (Shadowsocks / SS-2022)  ";
             _lblHostTitle.Text = "服务器地址 (IP):";
+            _lblPathTitle.Text = "WebSocket 路径:";
+            _lblAlgoTitle.Text = "加密算法:";
             _txtPath.Enabled = false;
             _txtPath.BackColor = Color.FromArgb(245, 245, 245);
             _chkUseTls.Enabled = false;
+            _txtSni.Enabled = false;
+            _txtSni.BackColor = Color.FromArgb(245, 245, 245);
             _numConcurrency.Enabled = false;
+            _btnImportSs.Visible = true;
+            _lblNodeTag.Text = string.IsNullOrEmpty(_config.NodeName) ? "" : _config.NodeName;
             _lblCdnTip.Text = "💡 当前为【Shadowsocks 协议】节点，使用 sing-box 工业级核心直连；支持一键导入 ss:// 订阅链接。";
         }
         else
         {
             _tabNode.Text = "  远程节点配置 (Cloudflare WSS)  ";
             _lblHostTitle.Text = "节点地址 (优选IP):";
+            _lblPathTitle.Text = "WebSocket 路径:";
+            _lblAlgoTitle.Text = "加密算法:";
             _txtPath.Enabled = true;
             _txtPath.BackColor = Color.White;
             _chkUseTls.Enabled = true;
+            _txtSni.Enabled = true;
+            _txtSni.BackColor = Color.White;
             _numConcurrency.Enabled = true;
+            _btnImportSs.Visible = false;
+            _lblNodeTag.Text = "";
             _lblCdnTip.Text = "💡 优选提示：若使用 Cloudflare 优选，【节点地址】填优选 IP 或优选域名，【真实域名】填您自己的域名；若不使用优选，两者填相同真实域名即可。";
         }
     }
@@ -981,14 +1049,19 @@ public partial class MainForm : Form
 
     private void SaveUiToConfig()
     {
-        _config.ProtocolType = _cboProtocol.SelectedIndex == 1 ? ProxyProtocolType.Shadowsocks : ProxyProtocolType.V2RayWss;
+        _config.ProtocolType = _cboProtocol.SelectedIndex switch
+        {
+            1 => ProxyProtocolType.Shadowsocks,
+            2 => ProxyProtocolType.HttpRpc,
+            _ => ProxyProtocolType.V2RayWss
+        };
         _config.ServerHost = _txtHost.Text.Trim();
         _config.ServerPort = (int)_numPort.Value;
         _config.Path = _txtPath.Text.Trim();
         _config.UseTls = _chkUseTls.Checked;
         _config.SniHost = string.IsNullOrWhiteSpace(_txtSni.Text) ? null : _txtSni.Text.Trim();
         _config.Password = _txtPassword.Text;
-        _config.Algorithm = !string.IsNullOrWhiteSpace(_cboAlgo.Text) ? _cboAlgo.Text.Trim() : (_cboAlgo.SelectedItem?.ToString() ?? "aes-256-gcm");
+        _config.Algorithm = CryptoFactory.NormalizeAlgorithm(!string.IsNullOrWhiteSpace(_cboAlgo.Text) ? _cboAlgo.Text.Trim() : (_cboAlgo.SelectedItem?.ToString() ?? "aes-256-gcm"));
         _config.ConcurrencyChannels = (int)_numConcurrency.Value;
         _config.LocalSocks5Port = (int)_numSocks5Port.Value;
         _config.EnableSystemProxy = _chkEnableSystemProxy.Checked;
@@ -1361,19 +1434,35 @@ public partial class MainForm : Form
             return;
         }
 
-        // 自研 Cloudflare WSS 协议测试
-        AppendLog($"正在测试连接到 {_config.ServerHost}:{_config.ServerPort} (路径: {_config.Path})...");
+        // 自研 WSS / 伪装 HTTP-RPC 协议测试
+        string protoTitle = _config.ProtocolType == ProxyProtocolType.HttpRpc ? "伪装 HTTP-RPC 极速隧道" : "Cloudflare WSS 隧道";
+        string rawPath = string.IsNullOrWhiteSpace(_config.Path)
+            ? (_config.ProtocolType == ProxyProtocolType.HttpRpc ? "/api/v1/stream" : "/tunnel")
+            : _config.Path;
+        string cleanPath = rawPath.StartsWith('/') ? rawPath : "/" + rawPath;
+        string normAlgo = CryptoFactory.NormalizeAlgorithm(_config.Algorithm);
+
+        AppendLog($"正在测试连接到 {protoTitle}: {_config.ServerHost}:{_config.ServerPort} (路径: {cleanPath}, 加密模式: {normAlgo})...");
 
         var sw = Stopwatch.StartNew();
         try
         {
             using var ws = new ClientWebSocket();
+            ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
 
             string scheme = _config.UseTls ? "wss" : "ws";
-            string cleanPath = _config.Path.StartsWith('/') ? _config.Path : "/" + _config.Path;
-            
             string targetDomain = !string.IsNullOrWhiteSpace(_config.SniHost) ? _config.SniHost.Trim() : _config.ServerHost.Trim();
-            var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}");
+            var uri = new Uri($"{scheme}://{targetDomain}:{_config.ServerPort}{cleanPath}?token={Uri.EscapeDataString(_config.Password)}&algo={Uri.EscapeDataString(normAlgo)}");
+
+            if (_config.ProtocolType == ProxyProtocolType.HttpRpc)
+            {
+                ws.Options.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+                ws.Options.SetRequestHeader("Accept", "application/octet-stream, */*");
+                ws.Options.SetRequestHeader("Cache-Control", "no-cache");
+                ws.Options.SetRequestHeader("Pragma", "no-cache");
+                ws.Options.SetRequestHeader("X-Session-Token", _config.Password);
+                ws.Options.SetRequestHeader("X-Algorithm", normAlgo);
+            }
 
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
@@ -1393,14 +1482,13 @@ public partial class MainForm : Form
             }
             else
             {
-                ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
                 await ws.ConnectAsync(uri, cts.Token);
             }
 
             sw.Stop();
 
-            AppendLog($"🎉 测试连接成功！往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost} -> SNI: {targetDomain})");
-            MessageBox.Show($"连接成功！\n节点: {_config.ServerHost}:{_config.ServerPort}\nSNI: {targetDomain}\n握手延迟: {sw.ElapsedMilliseconds} ms", "测试连接", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            AppendLog($"🎉 [{protoTitle} 测试成功] 往返握手耗时: {sw.ElapsedMilliseconds} ms (目标: {_config.ServerHost}:{_config.ServerPort}, 模式: {normAlgo})");
+            MessageBox.Show($"{protoTitle} 连接测试成功！\n\n节点地址: {_config.ServerHost}:{_config.ServerPort}\n加密模式: {normAlgo}\n往返握手延迟: {sw.ElapsedMilliseconds} ms", "测试成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Test Done", CancellationToken.None);
         }
         catch (Exception ex)

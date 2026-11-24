@@ -108,4 +108,48 @@ public class CryptoAndProtocolTests
         Assert.True(ProxyFrame.TryDeserialize(pong.Serialize(), out var decPong));
         Assert.Equal(ProxyCommand.Pong, decPong!.Command);
     }
+
+    [Theory]
+    [InlineData("消息加密", CryptoFactory.Aes256Gcm)]
+    [InlineData("🛡️ 消息加密 (强安全 - AES-256-GCM)", CryptoFactory.Aes256Gcm)]
+    [InlineData("🛡️ 消息加密 (强安全 - ChaCha20-Poly1305)", CryptoFactory.ChaCha20Poly1305)]
+    [InlineData("简单加密", CryptoFactory.CustomObfs)]
+    [InlineData("⚡ 简单加密 (动态混淆 - custom-obfs)", CryptoFactory.CustomObfs)]
+    [InlineData("急速模式", CryptoFactory.Plain)]
+    [InlineData("极速模式", CryptoFactory.Plain)]
+    [InlineData("🚀 急速模式 (极速直通 - plain)", CryptoFactory.Plain)]
+    [InlineData("aes-256-gcm", CryptoFactory.Aes256Gcm)]
+    [InlineData("custom-obfs", CryptoFactory.CustomObfs)]
+    [InlineData("plain", CryptoFactory.Plain)]
+    public void CryptoFactory_NormalizeAlgorithm_MapsFriendlyAliases(string input, string expected)
+    {
+        string actual = CryptoFactory.NormalizeAlgorithm(input);
+        Assert.Equal(expected, actual);
+
+        using var crypto = CryptoFactory.Create(input, "TestPassword123");
+        Assert.NotNull(crypto);
+    }
+
+    [Fact]
+    public void ProxyProtocolType_HttpRpc_SerializesCorrectly()
+    {
+        var config = new Proxy.Common.Models.ProxyClientConfig
+        {
+            ProtocolType = Proxy.Common.Models.ProxyProtocolType.HttpRpc,
+            ServerHost = "1.2.3.4",
+            ServerPort = 5005,
+            Path = "/api/v1/stream",
+            Algorithm = "custom-obfs"
+        };
+
+        string json = System.Text.Json.JsonSerializer.Serialize(config, Proxy.Common.Models.ProxyJsonContext.Default.ProxyClientConfig);
+        Assert.Contains("\"ProtocolType\":2", json);
+
+        var deserialized = System.Text.Json.JsonSerializer.Deserialize(json, Proxy.Common.Models.ProxyJsonContext.Default.ProxyClientConfig);
+        Assert.NotNull(deserialized);
+        Assert.Equal(Proxy.Common.Models.ProxyProtocolType.HttpRpc, deserialized.ProtocolType);
+        Assert.Equal("1.2.3.4", deserialized.ServerHost);
+        Assert.Equal(5005, deserialized.ServerPort);
+        Assert.Equal("/api/v1/stream", deserialized.Path);
+    }
 }

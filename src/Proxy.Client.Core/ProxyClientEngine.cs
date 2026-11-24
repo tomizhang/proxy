@@ -76,7 +76,8 @@ public sealed class ProxyClientEngine : IAsyncDisposable
         }
         else
         {
-            LogMessage?.Invoke($"正在连接代理服务器: {_config.ServerHost}:{_config.ServerPort} (并发连接池: {_config.ConcurrencyChannels} 条通道, 路径: {_config.Path}, 加密: {_config.Algorithm})...");
+            string protoName = _config.ProtocolType == ProxyProtocolType.HttpRpc ? "伪装 HTTP-RPC 极速隧道" : "Cloudflare WSS 隧道";
+            LogMessage?.Invoke($"正在连接 {protoName}: {_config.ServerHost}:{_config.ServerPort} (并发连接池: {_config.ConcurrencyChannels} 条通道, 路径: {_config.Path}, 加密: {_config.Algorithm})...");
 
             _transport = new TunnelTransport(_config);
             _transport.StatusChanged += (state, err) => StatusChanged?.Invoke(state, err);
